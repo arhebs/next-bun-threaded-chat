@@ -96,6 +96,7 @@ export default function Home() {
             onThreadsChange={handleThreadsChange}
           />
           <ChatPanel
+            key={`${selectedThreadId ?? "none"}:${initialMessages.length}`}
             thread={activeThread}
             initialMessages={initialMessages}
             isLoading={isLoadingMessages}
