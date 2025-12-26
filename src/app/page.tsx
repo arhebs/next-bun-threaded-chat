@@ -96,8 +96,8 @@ export default function Home() {
           <ThreadSidebar
             threads={threads}
             selectedThreadId={selectedThreadId}
-            onSelect={handleSelectThread}
-            onThreadsChange={handleThreadsChange}
+            onSelectAction={handleSelectThread}
+            onThreadsChangeAction={handleThreadsChange}
           />
           <ChatPanel
             key={selectedThreadId ?? "none"}

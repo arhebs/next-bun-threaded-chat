@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useChat } from "@ai-sdk/react";
@@ -175,7 +175,7 @@ export function ChatPanel({
 
   const canSend = Boolean(thread) && input.trim().length > 0 && !isLoading;
 
-  const handleSubmit = async (event?: React.FormEvent) => {
+  const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) {
       return;

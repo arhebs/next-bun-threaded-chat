@@ -11,8 +11,8 @@ import {
 type ThreadSidebarProps = {
   threads: Thread[];
   selectedThreadId: string | null;
-  onSelect: (threadId: string) => void;
-  onThreadsChange: (threads: Thread[]) => void;
+  onSelectAction: (threadId: string) => void;
+  onThreadsChangeAction: (threads: Thread[]) => void;
 };
 
 function formatShortDate(timestamp: number): string {
@@ -26,8 +26,8 @@ function formatShortDate(timestamp: number): string {
 export function ThreadSidebar({
   threads,
   selectedThreadId,
-  onSelect,
-  onThreadsChange,
+  onSelectAction,
+  onThreadsChangeAction,
 }: ThreadSidebarProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -42,7 +42,7 @@ export function ThreadSidebar({
     listThreads()
       .then((data) => {
         if (active) {
-          onThreadsChange(data);
+          onThreadsChangeAction(data);
         }
       })
       .catch((err) => {
@@ -61,7 +61,7 @@ export function ThreadSidebar({
     return () => {
       active = false;
     };
-  }, [onThreadsChange]);
+  }, [onThreadsChangeAction]);
 
   const handleCreate = async () => {
     try {
@@ -69,8 +69,8 @@ export function ThreadSidebar({
       setError(null);
       const thread = await createThread();
       const nextThreads = [thread, ...threads];
-      onThreadsChange(nextThreads);
-      onSelect(thread.id);
+      onThreadsChangeAction(nextThreads);
+      onSelectAction(thread.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create thread";
       setError(message);
@@ -127,7 +127,7 @@ export function ThreadSidebar({
                 <button
                   key={thread.id}
                   type="button"
-                  onClick={() => onSelect(thread.id)}
+                  onClick={() => onSelectAction(thread.id)}
                   className={`w-full rounded-xl border px-4 py-3 text-left transition ${
                     isSelected
                       ? "border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]"
