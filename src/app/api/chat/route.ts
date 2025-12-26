@@ -45,6 +45,9 @@ export async function POST(request: Request): Promise<Response> {
       system: SYSTEM_PROMPT,
       messages: modelMessages,
       tools: toolSet,
+      experimental_context: {
+        uiMessages: validated,
+      },
     });
 
     return result.toUIMessageStreamResponse({

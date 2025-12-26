@@ -1,5 +1,6 @@
 import { tool, zodSchema } from "ai";
 
+import { assertConfirmed, getContextMessages } from "./confirm-gate";
 import {
   confirmActionInputSchema,
   confirmActionOutputSchema,
@@ -36,13 +37,35 @@ export const tools = {
     description: "Update a single cell in Sheet1 (requires confirmation).",
     inputSchema: zodSchema(updateCellInputSchema),
     outputSchema: zodSchema(updateCellOutputSchema),
-    execute: async () => notImplemented("updateCell"),
+    execute: async (input, options) => {
+      const messages = getContextMessages(options.experimental_context);
+      assertConfirmed(messages, {
+        token: input.confirmationToken,
+        action: "updateCell",
+        expectedPayload: {
+          sheet: input.sheet,
+          cell: input.cell,
+          value: input.value,
+        },
+      });
+      return notImplemented("updateCell");
+    },
   }),
   deleteThread: tool({
     description: "Delete a thread by id (requires confirmation).",
     inputSchema: zodSchema(deleteThreadInputSchema),
     outputSchema: zodSchema(deleteThreadOutputSchema),
-    execute: async () => notImplemented("deleteThread"),
+    execute: async (input, options) => {
+      const messages = getContextMessages(options.experimental_context);
+      assertConfirmed(messages, {
+        token: input.confirmationToken,
+        action: "deleteThread",
+        expectedPayload: {
+          threadId: input.threadId,
+        },
+      });
+      return notImplemented("deleteThread");
+    },
   }),
   sendInvites: tool({
     description: "Mock tool that pretends to send email invites.",
