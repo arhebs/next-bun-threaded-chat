@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Security Notes
+
+This project uses the `xlsx` package, which has known security advisories in the 0.18.x line.
+For this assignment, treat XLSX handling as trusted-local only:
+- Use only the bundled `data/example.xlsx` (no user uploads).
+- Validate sheet names and A1 ranges strictly.
+- Enforce a hard limit on range size before reading/writing.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
