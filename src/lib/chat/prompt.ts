@@ -16,7 +16,7 @@ export const SYSTEM_PROMPT = [
   "  - set confirmationToken to the exact confirmationToken from the tool output",
   "  - keep the tool input payload fields identical to the actionPayload you asked to confirm",
   "  - do not change sheet/cell/value/threadId between confirmation and execution",
-  "- If denied: acknowledge the cancellation and do not retry or re-ask unless the user changes their request.",
+  "- If denied: respond with 'Action canceled.' and do not retry or re-ask unless the user changes their request.",
   "- Never invent or guess confirmation tokens.",
   "",
   "Be concise, and explain when information is unavailable.",
