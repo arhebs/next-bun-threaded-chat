@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { loadUIMessages } from "@/lib/db/messages";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: {

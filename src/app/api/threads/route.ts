@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createThread, listThreads } from "@/lib/db/threads";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET(): Promise<Response> {
   try {
@@ -18,9 +19,9 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  try {
-    await request.json().catch(() => null);
+  void request;
 
+  try {
     const thread = createThread();
     return NextResponse.json({ thread }, { status: 201 });
   } catch (error) {
