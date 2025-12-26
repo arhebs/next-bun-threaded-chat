@@ -80,16 +80,16 @@ export function ThreadSidebar({
   };
 
   return (
-    <aside className="relative flex w-full flex-col gap-6 border-b border-[color:var(--border)] bg-[color:var(--surface)] p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:h-screen lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out]">
+    <aside className="relative flex w-full flex-col gap-6 border-b border-border bg-surface p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:h-screen lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--muted)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
             Threads
           </p>
-          <h1 className="mt-3 text-xl font-semibold text-[color:var(--foreground)]">
+          <h1 className="mt-3 text-xl font-semibold text-foreground">
             Threaded Sheet Chat
           </h1>
-          <p className="mt-2 text-sm text-[color:var(--muted)]">
+          <p className="mt-2 text-sm text-muted">
             Organize conversations by intent and data range.
           </p>
         </div>
@@ -97,7 +97,7 @@ export function ThreadSidebar({
           type="button"
           onClick={handleCreate}
           disabled={isCreating}
-          className="rounded-full bg-[color:var(--accent-soft)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--accent-ink)] transition hover:opacity-90 disabled:opacity-60"
+          className="rounded-full bg-accent-soft px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-accent-ink transition hover:opacity-90 disabled:opacity-60"
         >
           {isCreating ? "Creating" : "New"}
         </button>
@@ -105,18 +105,18 @@ export function ThreadSidebar({
 
       <div className="flex flex-1 flex-col gap-3">
         {error ? (
-          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--muted)]">
+          <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-muted">
             {error}
           </div>
         ) : null}
         {isLoading ? (
           <div className="space-y-2">
-            <div className="h-10 rounded-xl bg-[color:var(--surface-muted)]" />
-            <div className="h-10 rounded-xl bg-[color:var(--surface-muted)]" />
-            <div className="h-10 rounded-xl bg-[color:var(--surface-muted)]" />
+            <div className="h-10 rounded-xl bg-surface-muted" />
+            <div className="h-10 rounded-xl bg-surface-muted" />
+            <div className="h-10 rounded-xl bg-surface-muted" />
           </div>
         ) : threads.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[color:var(--border)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--muted)]">
+          <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-4 text-sm text-muted">
             No threads yet. Start a chat to see history here.
           </div>
         ) : (
@@ -130,15 +130,15 @@ export function ThreadSidebar({
                   onClick={() => onSelectAction(thread.id)}
                   className={`w-full rounded-xl border px-4 py-3 text-left transition ${
                     isSelected
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]"
-                      : "border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] hover:bg-[color:var(--surface-muted)]"
+                      ? "border-accent bg-accent-soft text-accent-ink"
+                      : "border-border bg-surface text-foreground hover:bg-surface-muted"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold">
                       {thread.title || "Untitled thread"}
                     </span>
-                    <span className="text-[11px] uppercase tracking-[0.2em] text-[color:var(--muted)]">
+                    <span className="text-[11px] uppercase tracking-[0.2em] text-muted">
                       {formatShortDate(thread.updatedAt)}
                     </span>
                   </div>
@@ -149,7 +149,7 @@ export function ThreadSidebar({
         )}
       </div>
 
-      <div className="mt-auto rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] p-4 text-xs text-[color:var(--muted)]">
+      <div className="mt-auto rounded-2xl border border-border bg-surface-muted p-4 text-xs text-muted">
         Tip: use mentions like <span className="font-mono">@Sheet1!A1:C5</span> to
         reference ranges.
       </div>

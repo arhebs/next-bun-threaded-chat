@@ -189,27 +189,27 @@ export function ChatPanel({
     <section className="flex min-h-[calc(100vh-120px)] flex-1 flex-col gap-6 p-6 lg:h-screen motion-safe:animate-[rise_0.7s_ease-out_0.1s_both]">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--muted)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
             Active thread
           </p>
-          <h2 className="mt-3 text-2xl font-semibold text-[color:var(--foreground)]">
+          <h2 className="mt-3 text-2xl font-semibold text-foreground">
             {title}
           </h2>
-          <p className="mt-2 text-sm text-[color:var(--muted)]">{subtitle}</p>
+          <p className="mt-2 text-sm text-muted">{subtitle}</p>
         </div>
-        <span className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--muted)]">
+        <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
           {status}
         </span>
       </header>
 
       <div className="flex flex-1 flex-col gap-4">
-        <div className="flex-1 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
+        <div className="flex-1 rounded-3xl border border-border bg-surface p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-base font-medium text-[color:var(--foreground)]">
+              <p className="text-base font-medium text-foreground">
                 {mainMessage}
               </p>
-              <p className="text-sm text-[color:var(--muted)]">{hint}</p>
+              <p className="text-sm text-muted">{hint}</p>
             </div>
           ) : (
             <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
@@ -218,11 +218,11 @@ export function ChatPanel({
                   key={message.id}
                   className={`rounded-2xl border p-4 ${
                     message.role === "user"
-                      ? "ml-auto border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--accent-ink)]"
-                      : "border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)]"
+                      ? "ml-auto border-accent bg-accent-soft text-accent-ink"
+                      : "border-border bg-surface text-foreground"
                   }`}
                 >
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--muted)]">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                     {message.role}
                   </div>
                   <div className="space-y-3 text-sm">
@@ -283,7 +283,7 @@ export function ChatPanel({
                         return (
                           <div
                             key={`${message.id}-part-${index}`}
-                            className="rounded-xl border border-dashed border-[color:var(--border)] bg-[color:var(--surface-muted)] p-3 text-xs text-[color:var(--muted)]"
+                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
                           >
                             <div className="font-semibold uppercase tracking-[0.2em]">
                               Tool: {toolName}
@@ -295,7 +295,7 @@ export function ChatPanel({
                       return (
                         <div
                           key={`${message.id}-part-${index}`}
-                          className="rounded-xl border border-dashed border-[color:var(--border)] bg-[color:var(--surface-muted)] p-3 text-xs text-[color:var(--muted)]"
+                          className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
                         >
                           Unsupported part: {part.type}
                         </div>
@@ -310,24 +310,24 @@ export function ChatPanel({
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4"
+          className="rounded-3xl border border-border bg-surface p-4"
         >
           <div className="flex flex-col gap-3">
             <textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="Type a message to get started..."
-              className="min-h-[96px] resize-none bg-transparent text-sm text-[color:var(--foreground)] placeholder:text-[color:var(--muted)] focus:outline-none"
+              className="min-h-24 resize-none bg-transparent text-sm text-foreground placeholder:text-muted focus:outline-none"
               disabled={!thread || isLoading}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-[color:var(--muted)]">
+              <span className="text-xs text-muted">
                 Mentions: <span className="font-mono">@Sheet1!A1:C5</span>
               </span>
               <button
                 type="submit"
                 disabled={!canSend}
-                className="rounded-full bg-[color:var(--accent)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition disabled:opacity-60"
+                className="rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition disabled:opacity-60"
               >
                 Send
               </button>

@@ -83,7 +83,7 @@ export default function Home() {
     threads.find((thread) => thread.id === selectedThreadId) ?? null;
 
   return (
-    <div className="min-h-screen bg-[color:var(--background)] text-[color:var(--foreground)]">
+    <div className="min-h-screen bg-background text-foreground">
       <div className="relative isolate min-h-screen overflow-hidden">
         <div
           className="pointer-events-none absolute inset-0 opacity-80"
