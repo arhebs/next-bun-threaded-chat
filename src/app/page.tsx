@@ -23,15 +23,19 @@ export default function Home() {
         setIsLoadingMessages(false);
         return null;
       }
-      if (current) {
-        return current;
-      }
-      const nextId = nextThreads[0]?.id ?? null;
-      if (nextId) {
+
+      const currentIsValid = Boolean(
+        current && nextThreads.some((thread) => thread.id === current)
+      );
+
+      const nextId = currentIsValid ? current : nextThreads[0]?.id ?? null;
+
+      if (nextId && nextId !== current) {
         setInitialMessages([]);
         setMessageError(null);
         setIsLoadingMessages(true);
       }
+
       return nextId;
     });
   }, []);
@@ -96,7 +100,7 @@ export default function Home() {
             onThreadsChange={handleThreadsChange}
           />
           <ChatPanel
-            key={`${selectedThreadId ?? "none"}:${initialMessages.length}`}
+            key={selectedThreadId ?? "none"}
             thread={activeThread}
             initialMessages={initialMessages}
             isLoading={isLoadingMessages}

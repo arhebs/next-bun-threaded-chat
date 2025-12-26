@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useChat } from "@ai-sdk/react";
@@ -39,6 +39,7 @@ export function ChatPanel({
 
   const {
     messages,
+    setMessages,
     sendMessage,
     status: chatStatus,
     error: chatError,
@@ -48,6 +49,10 @@ export function ChatPanel({
     transport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages, setMessages]);
 
   const title = thread?.title?.trim()
     ? thread.title
