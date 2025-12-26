@@ -3,5 +3,6 @@ export function loadWorkbook(): unknown {
 }
 
 export function saveWorkbook(workbook: unknown): void {
+  void workbook;
   throw new Error("Not implemented");
 }
