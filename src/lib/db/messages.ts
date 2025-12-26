@@ -11,18 +11,37 @@ type MessageMetadata = {
   createdAt?: unknown;
 };
 
-function resolveCreatedAt(message: UIMessage): number {
+type ExistingMessageRow = Pick<MessageRow, "thread_id" | "created_at">;
+
+function resolveCreatedAt(message: UIMessage, fallbackCreatedAt: number): number {
   const metadata = message.metadata as MessageMetadata | undefined;
   if (metadata && typeof metadata.createdAt === "number") {
     return metadata.createdAt;
   }
-  return Date.now();
+  return fallbackCreatedAt;
+}
+
+function withCreatedAtMetadata(message: UIMessage, createdAt: number): UIMessage {
+  if (message.metadata == null) {
+    return { ...message, metadata: { createdAt } };
+  }
+
+  if (typeof message.metadata === "object" && !Array.isArray(message.metadata)) {
+    const metadataRecord = message.metadata as Record<string, unknown>;
+    if (typeof metadataRecord.createdAt === "number") {
+      return message;
+    }
+    return { ...message, metadata: { ...metadataRecord, createdAt } };
+  }
+
+  return message;
 }
 
 function parseMessageRow(row: MessageRow): UIMessage {
   if (row.ui_message_json) {
     try {
-      return JSON.parse(row.ui_message_json) as UIMessage;
+      const parsed = JSON.parse(row.ui_message_json) as UIMessage;
+      return withCreatedAtMetadata(parsed, row.created_at);
     } catch {
       // fall through to reconstruction
     }
@@ -45,35 +64,70 @@ function parseMessageRow(row: MessageRow): UIMessage {
     }
   }
 
-  return {
-    id: row.id,
-    role: row.role,
-    parts,
-  };
+  return withCreatedAtMetadata(
+    {
+      id: row.id,
+      role: row.role,
+      parts,
+    },
+    row.created_at
+  );
 }
 
 export function upsertMessages(threadId: string, messages: UIMessage[]): void {
   const db = getDb();
-  const insert = db.query(
-    "INSERT OR REPLACE INTO messages (id, thread_id, role, content_text, tool_invocations_json, ui_message_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  );
 
-  for (const message of messages) {
-    const contentText = extractContentText(message);
-    const toolParts = extractToolInvocations(message);
-    const toolJson = toolParts.length > 0 ? JSON.stringify(toolParts) : null;
-    const uiJson = JSON.stringify(message);
-    const createdAt = resolveCreatedAt(message);
-
-    insert.run(
-      message.id,
-      threadId,
-      message.role,
-      contentText,
-      toolJson,
-      uiJson,
-      createdAt
+  db.exec("BEGIN;");
+  try {
+    const selectExisting = db.query<ExistingMessageRow>(
+      "SELECT thread_id, created_at FROM messages WHERE id = ?"
     );
+
+    const upsert = db.query(
+      "INSERT INTO messages (id, thread_id, role, content_text, tool_invocations_json, ui_message_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET role = excluded.role, content_text = excluded.content_text, tool_invocations_json = excluded.tool_invocations_json, ui_message_json = excluded.ui_message_json"
+    );
+
+    const baseNow = Date.now();
+
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index];
+      const existing = selectExisting.get(message.id);
+
+      if (existing && existing.thread_id !== threadId) {
+        throw new Error(
+          `Message ${message.id} belongs to thread ${existing.thread_id}, not ${threadId}`
+        );
+      }
+
+      const createdAt = existing
+        ? existing.created_at
+        : resolveCreatedAt(message, baseNow + index);
+
+      const persistedMessage = withCreatedAtMetadata(message, createdAt);
+      const contentText = extractContentText(persistedMessage);
+      const toolParts = extractToolInvocations(persistedMessage);
+      const toolJson = toolParts.length > 0 ? JSON.stringify(toolParts) : null;
+      const uiJson = JSON.stringify(persistedMessage);
+
+      upsert.run(
+        persistedMessage.id,
+        threadId,
+        persistedMessage.role,
+        contentText,
+        toolJson,
+        uiJson,
+        createdAt
+      );
+    }
+
+    db.exec("COMMIT;");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK;");
+    } catch {
+      // ignore rollback errors
+    }
+    throw error;
   }
 }
 
@@ -81,7 +135,7 @@ export function loadUIMessages(threadId: string): UIMessage[] {
   const db = getDb();
   const rows = db
     .query<MessageRow>(
-      `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE thread_id = ? ORDER BY created_at ASC`
+      `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE thread_id = ? ORDER BY created_at ASC, id ASC`
     )
     .all(threadId);
 
