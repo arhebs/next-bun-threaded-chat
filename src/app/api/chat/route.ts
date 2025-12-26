@@ -1,5 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { convertToModelMessages, generateId, streamText, validateUIMessages } from "ai";
+import type { Tool } from "ai";
 import { NextResponse } from "next/server";
 
 import { SYSTEM_PROMPT } from "@/lib/chat/prompt";
@@ -28,18 +29,22 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: "Missing messages" }, { status: 400 });
     }
 
+    const toolSet = tools as unknown as Record<string, Tool<unknown, unknown>>;
+
     const validated = await validateUIMessages({
       messages: body.messages,
-      tools,
+      tools: toolSet,
     });
 
-    const modelMessages = await convertToModelMessages(validated, { tools });
+    const modelMessages = await convertToModelMessages(validated, {
+      tools: toolSet,
+    });
 
     const result = streamText({
       model: openai("gpt-4o-mini"),
       system: SYSTEM_PROMPT,
       messages: modelMessages,
-      tools,
+      tools: toolSet,
     });
 
     return result.toUIMessageStreamResponse({
