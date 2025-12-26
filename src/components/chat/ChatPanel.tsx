@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useChat } from "@ai-sdk/react";
 
+import { ConfirmationCard } from "@/components/ui/ConfirmationCard";
 import type { Thread } from "@/lib/client/api";
+import type {
+  ConfirmActionInput,
+  ConfirmActionOutput,
+} from "@/lib/chat/tool-types";
 
 type ChatPanelProps = {
   thread: Thread | null;
@@ -20,12 +25,53 @@ type TextLikePart = Extract<ChatPart, { type: "text" | "reasoning" }>;
 
 type ToolPart = Extract<ChatPart, { type: `tool-${string}` } | { type: "dynamic-tool" }>;
 
+type ConfirmActionPart = ChatPart & {
+  type: "tool-confirmAction";
+  toolCallId: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+};
+
+type ConfirmStatus = "pending" | "approved" | "denied" | "error";
+
 function isTextLikePart(part: ChatPart): part is TextLikePart {
   return part.type === "text" || part.type === "reasoning";
 }
 
 function isToolLikePart(part: ChatPart): part is ToolPart {
   return part.type === "dynamic-tool" || part.type.startsWith("tool-");
+}
+
+function isConfirmActionPart(part: ChatPart): part is ConfirmActionPart {
+  return part.type === "tool-confirmAction";
+}
+
+function formatConfirmAction(action: ConfirmActionInput["action"]): string {
+  switch (action) {
+    case "updateCell":
+      return "Update a spreadsheet cell";
+    case "deleteThread":
+      return "Delete this thread";
+    case "sendInvites":
+      return "Send email invites";
+    default:
+      return "Confirm action";
+  }
+}
+
+function resolveConfirmStatus(part: ConfirmActionPart): ConfirmStatus {
+  if (part.state === "output-error") {
+    return "error";
+  }
+  if ("output" in part && part.output) {
+    const output = part.output as ConfirmActionOutput;
+    return output.approved ? "approved" : "denied";
+  }
+  if (part.state === "output-denied") {
+    return "denied";
+  }
+  return "pending";
 }
 
 export function ChatPanel({
@@ -40,6 +86,7 @@ export function ChatPanel({
   const {
     messages,
     setMessages,
+    addToolOutput,
     sendMessage,
     status: chatStatus,
     error: chatError,
@@ -53,6 +100,44 @@ export function ChatPanel({
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages, setMessages]);
+
+  const confirmationTokensRef = useRef(new Map<string, string>());
+
+  const getConfirmationToken = useCallback((toolCallId: string) => {
+    const existing = confirmationTokensRef.current.get(toolCallId);
+    if (existing) {
+      return existing;
+    }
+    const token =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    confirmationTokensRef.current.set(toolCallId, token);
+    return token;
+  }, []);
+
+  const handleConfirmAction = useCallback(
+    async (part: ConfirmActionPart, approved: boolean) => {
+      const input = part.input as ConfirmActionInput | undefined;
+      if (!input || !part.toolCallId) {
+        return;
+      }
+      const output = {
+        approved,
+        confirmationToken: getConfirmationToken(part.toolCallId),
+        action: input.action,
+        actionPayload: input.actionPayload,
+        ...(approved ? {} : { reason: "User declined" }),
+      } as ConfirmActionOutput;
+
+      await addToolOutput({
+        tool: "confirmAction",
+        toolCallId: part.toolCallId,
+        output,
+      });
+    },
+    [addToolOutput, getConfirmationToken]
+  );
 
   const title = thread?.title?.trim()
     ? thread.title
@@ -147,6 +232,46 @@ export function ChatPanel({
                           <p key={`${message.id}-part-${index}`}>
                             {part.text}
                           </p>
+                        );
+                      }
+                      if (isConfirmActionPart(part)) {
+                        const input = part.input as ConfirmActionInput | undefined;
+                        const output =
+                          "output" in part
+                            ? (part.output as ConfirmActionOutput | undefined)
+                            : undefined;
+                        const action = input?.action ?? output?.action;
+                        const payload = input?.actionPayload ?? output?.actionPayload;
+                        const status = resolveConfirmStatus(part);
+                        const title = action ? formatConfirmAction(action) : "Confirm action";
+                        const description =
+                          input?.prompt ??
+                          (status === "pending"
+                            ? "Review and confirm to proceed."
+                            : "Confirmation recorded.");
+                        const isActionable =
+                          status === "pending" && part.state === "input-available" && input;
+
+                        return (
+                          <div key={`${message.id}-part-${index}`}>
+                            <ConfirmationCard
+                              title={title}
+                              description={description}
+                              payload={payload}
+                              status={status}
+                              onApprove={
+                                isActionable
+                                  ? () => handleConfirmAction(part, true)
+                                  : undefined
+                              }
+                              onReject={
+                                isActionable
+                                  ? () => handleConfirmAction(part, false)
+                                  : undefined
+                              }
+                              disabled={!isActionable}
+                            />
+                          </div>
                         );
                       }
                       if (isToolLikePart(part)) {
