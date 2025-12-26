@@ -1,4 +1,48 @@
-export function ChatPanel() {
+"use client";
+
+import type { UIMessage } from "ai";
+
+import type { Thread } from "@/lib/client/api";
+
+type ChatPanelProps = {
+  thread: Thread | null;
+  initialMessages: UIMessage[];
+  isLoading: boolean;
+  error: string | null;
+};
+
+export function ChatPanel({
+  thread,
+  initialMessages,
+  isLoading,
+  error,
+}: ChatPanelProps) {
+  const title = thread?.title?.trim()
+    ? thread.title
+    : thread
+      ? "Untitled thread"
+      : "No thread selected";
+  const status = error ? "Error" : isLoading ? "Loading" : "Ready";
+  const subtitle = error
+    ? error
+    : isLoading
+      ? "Loading messages..."
+      : thread
+        ? `${initialMessages.length} messages loaded`
+        : "Create or select a thread to begin.";
+
+  const mainMessage = error
+    ? "We couldn't load messages for this thread."
+    : isLoading
+      ? "Fetching saved messages..."
+      : thread
+        ? "Your chat will appear here."
+        : "Select a thread to start chatting.";
+
+  const hint = thread
+    ? "Ask about Sheet1 or paste a mention to preview a range."
+    : "Start by creating a new thread in the sidebar.";
+
   return (
     <section className="flex min-h-[calc(100vh-120px)] flex-1 flex-col gap-6 p-6 lg:h-screen motion-safe:animate-[rise_0.7s_ease-out_0.1s_both]">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -7,14 +51,12 @@ export function ChatPanel() {
             Active thread
           </p>
           <h2 className="mt-3 text-2xl font-semibold text-[color:var(--foreground)]">
-            New thread
+            {title}
           </h2>
-          <p className="mt-2 text-sm text-[color:var(--muted)]">
-            Messages will persist when you start chatting.
-          </p>
+          <p className="mt-2 text-sm text-[color:var(--muted)]">{subtitle}</p>
         </div>
         <span className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--muted)]">
-          Ready
+          {status}
         </span>
       </header>
 
@@ -22,11 +64,9 @@ export function ChatPanel() {
         <div className="flex-1 rounded-3xl border border-[color:var(--border)] bg-[color:var(--surface)] p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <p className="text-base font-medium text-[color:var(--foreground)]">
-              Your chat will appear here.
+              {mainMessage}
             </p>
-            <p className="text-sm text-[color:var(--muted)]">
-              Ask about Sheet1 or paste a mention to preview a range.
-            </p>
+            <p className="text-sm text-[color:var(--muted)]">{hint}</p>
           </div>
         </div>
 

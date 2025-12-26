@@ -1,7 +1,83 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { UIMessage } from "ai";
+
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ThreadSidebar } from "@/components/chat/ThreadSidebar";
+import { fetchThreadMessages, type Thread } from "@/lib/client/api";
 
 export default function Home() {
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+
+  const handleThreadsChange = useCallback((nextThreads: Thread[]) => {
+    setThreads(nextThreads);
+    setSelectedThreadId((current) => {
+      if (nextThreads.length === 0) {
+        setInitialMessages([]);
+        setMessageError(null);
+        setIsLoadingMessages(false);
+        return null;
+      }
+      if (current) {
+        return current;
+      }
+      const nextId = nextThreads[0]?.id ?? null;
+      if (nextId) {
+        setInitialMessages([]);
+        setMessageError(null);
+        setIsLoadingMessages(true);
+      }
+      return nextId;
+    });
+  }, []);
+
+  const handleSelectThread = useCallback((threadId: string) => {
+    setSelectedThreadId(threadId);
+    setInitialMessages([]);
+    setMessageError(null);
+    setIsLoadingMessages(true);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedThreadId) {
+      return;
+    }
+
+    let active = true;
+
+    fetchThreadMessages(selectedThreadId)
+      .then((messages) => {
+        if (active) {
+          setInitialMessages(messages);
+        }
+      })
+      .catch((err) => {
+        if (!active) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to load messages";
+        setMessageError(message);
+        setInitialMessages([]);
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingMessages(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedThreadId]);
+
+  const activeThread =
+    threads.find((thread) => thread.id === selectedThreadId) ?? null;
+
   return (
     <div className="min-h-screen bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="relative isolate min-h-screen overflow-hidden">
@@ -13,8 +89,18 @@ export default function Home() {
           }}
         />
         <div className="relative flex min-h-screen flex-col lg:flex-row">
-          <ThreadSidebar />
-          <ChatPanel />
+          <ThreadSidebar
+            threads={threads}
+            selectedThreadId={selectedThreadId}
+            onSelect={handleSelectThread}
+            onThreadsChange={handleThreadsChange}
+          />
+          <ChatPanel
+            thread={activeThread}
+            initialMessages={initialMessages}
+            isLoading={isLoadingMessages}
+            error={messageError}
+          />
         </div>
       </div>
     </div>
