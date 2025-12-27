@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const sheetNameSchema = z.literal("Sheet1");
+const sheetNameInputSchema = sheetNameSchema.default("Sheet1");
 export const a1RangeSchema = z
   .string()
   .min(1)
@@ -21,6 +22,10 @@ export const updateCellPayloadSchema = z.object({
   sheet: sheetNameSchema,
   cell: a1CellSchema,
   value: cellValueSchema,
+});
+
+const updateCellPayloadInputSchema = updateCellPayloadSchema.extend({
+  sheet: sheetNameInputSchema,
 });
 
 export const deleteThreadPayloadSchema = z.object({
@@ -68,7 +73,7 @@ const confirmActionBaseInputSchema = z.object({
 export const confirmActionInputSchema = z.discriminatedUnion("action", [
   confirmActionBaseInputSchema.extend({
     action: z.literal("updateCell"),
-    actionPayload: z.preprocess(parseJsonish, updateCellPayloadSchema),
+    actionPayload: z.preprocess(parseJsonish, updateCellPayloadInputSchema),
   }),
   confirmActionBaseInputSchema.extend({
     action: z.literal("deleteThread"),
@@ -102,7 +107,7 @@ export const confirmActionOutputSchema = z.discriminatedUnion("action", [
 ]);
 
 export const readRangeInputSchema = z.object({
-  sheet: sheetNameSchema,
+  sheet: sheetNameInputSchema,
   range: a1RangeSchema,
 });
 
@@ -113,7 +118,7 @@ export const readRangeOutputSchema = z.object({
 });
 
 export const updateCellInputSchema = z.object({
-  sheet: sheetNameSchema,
+  sheet: sheetNameInputSchema,
   cell: a1CellSchema,
   value: cellValueSchema,
   confirmationToken: z.string().min(1),
@@ -143,7 +148,7 @@ export const sendInvitesOutputSchema = z.object({
 });
 
 export const explainFormulaInputSchema = z.object({
-  sheet: sheetNameSchema,
+  sheet: sheetNameInputSchema,
   cell: a1CellSchema,
 });
 
