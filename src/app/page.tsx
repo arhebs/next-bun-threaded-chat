@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ThreadSidebar } from "@/components/chat/ThreadSidebar";
-import { fetchThreadMessages, type Thread } from "@/lib/client/api";
+import { fetchThreadMessages, listThreads, type Thread } from "@/lib/client/api";
 
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -46,6 +46,15 @@ export default function Home() {
     setMessageError(null);
     setIsLoadingMessages(true);
   }, []);
+
+  const refreshThreads = useCallback(async () => {
+    try {
+      const nextThreads = await listThreads();
+      handleThreadsChange(nextThreads);
+    } catch (err) {
+      console.error("Failed to refresh threads", err);
+    }
+  }, [handleThreadsChange]);
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -105,6 +114,7 @@ export default function Home() {
             initialMessages={initialMessages}
             isLoading={isLoadingMessages}
             error={messageError}
+            onThreadsRefreshAction={refreshThreads}
           />
         </div>
       </div>

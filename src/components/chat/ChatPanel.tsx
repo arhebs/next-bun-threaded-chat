@@ -17,6 +17,7 @@ type ChatPanelProps = {
   initialMessages: UIMessage[];
   isLoading: boolean;
   error: string | null;
+  onThreadsRefreshAction?: () => void;
 };
 
 type ChatPart = UIMessage["parts"][number];
@@ -31,6 +32,7 @@ type ConfirmActionPart = ChatPart & {
   state?: string;
   input?: unknown;
   output?: unknown;
+  errorText?: string;
 };
 
 type ConfirmStatus = "pending" | "approved" | "denied" | "error";
@@ -79,6 +81,7 @@ export function ChatPanel({
   initialMessages,
   isLoading,
   error,
+  onThreadsRefreshAction,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
@@ -100,6 +103,25 @@ export function ChatPanel({
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages, setMessages]);
+
+  const previousChatStatusRef = useRef(chatStatus);
+
+  useEffect(() => {
+    const previousStatus = previousChatStatusRef.current;
+    previousChatStatusRef.current = chatStatus;
+
+    if (!thread?.id) {
+      return;
+    }
+
+    const finished =
+      (previousStatus === "submitted" || previousStatus === "streaming") &&
+      chatStatus === "ready";
+
+    if (finished) {
+      onThreadsRefreshAction?.();
+    }
+  }, [chatStatus, onThreadsRefreshAction, thread?.id]);
 
   const confirmationTokensRef = useRef(new Map<string, string>());
 
@@ -146,7 +168,13 @@ export function ChatPanel({
       : "No thread selected";
 
   const loadingMessage = isLoading ? "Loading messages..." : null;
-  const chatStatusLabel = chatStatus === "streaming" ? "Streaming" : "Ready";
+  const isChatBusy = chatStatus === "submitted" || chatStatus === "streaming";
+  const chatStatusLabel =
+    chatStatus === "submitted"
+      ? "Sending"
+      : chatStatus === "streaming"
+        ? "Streaming"
+        : "Ready";
   const status = error || chatError ? "Error" : loadingMessage ? "Loading" : chatStatusLabel;
 
   const subtitle = error
@@ -173,7 +201,8 @@ export function ChatPanel({
     ? "Ask about Sheet1 or paste a mention to preview a range."
     : "Start by creating a new thread in the sidebar.";
 
-  const canSend = Boolean(thread) && input.trim().length > 0 && !isLoading;
+  const canSend =
+    Boolean(thread) && input.trim().length > 0 && !isLoading && !isChatBusy;
 
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -245,10 +274,12 @@ export function ChatPanel({
                         const status = resolveConfirmStatus(part);
                         const title = action ? formatConfirmAction(action) : "Confirm action";
                         const description =
-                          input?.prompt ??
-                          (status === "pending"
-                            ? "Review and confirm to proceed."
-                            : "Confirmation recorded.");
+                          status === "error"
+                            ? part.errorText ?? "Failed to prepare confirmation."
+                            : input?.prompt ??
+                                (status === "pending"
+                                  ? "Review and confirm to proceed."
+                                  : "Confirmation recorded.");
                         const isActionable =
                           status === "pending" && part.state === "input-available" && input;
 
@@ -291,6 +322,9 @@ export function ChatPanel({
                             <div className="mt-2">Status: {toolState}</div>
                           </div>
                         );
+                      }
+                      if (part.type === "step-start") {
+                        return null;
                       }
                       return (
                         <div

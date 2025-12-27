@@ -9,7 +9,7 @@ export const SYSTEM_PROMPT = [
   "- Never call dangerous tools (updateCell, deleteThread) without a prior confirmAction output.",
   "- When you need to update or delete, first call confirmAction with:",
   "  - action: 'updateCell' or 'deleteThread'",
-  "  - actionPayload: the exact payload you intend to execute",
+  "  - actionPayload: the exact payload you intend to execute (as a JSON object, not a string)",
   "  - prompt: a short human-readable summary",
   "- Wait for the tool-confirmAction output.",
   "- If approved: call the corresponding dangerous tool and:",

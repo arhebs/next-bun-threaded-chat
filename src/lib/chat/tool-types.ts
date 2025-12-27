@@ -32,6 +32,35 @@ export const sendInvitesPayloadSchema = z.object({
   message: z.string().optional(),
 });
 
+function parseJsonish(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // fall through
+  }
+
+  const normalized = trimmed
+    .replace(/\bNone\b/g, "null")
+    .replace(/\bTrue\b/g, "true")
+    .replace(/\bFalse\b/g, "false")
+    .replace(/'/g, '"');
+
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return value;
+  }
+}
+
 const confirmActionBaseInputSchema = z.object({
   prompt: z.string().optional(),
 });
@@ -39,15 +68,15 @@ const confirmActionBaseInputSchema = z.object({
 export const confirmActionInputSchema = z.discriminatedUnion("action", [
   confirmActionBaseInputSchema.extend({
     action: z.literal("updateCell"),
-    actionPayload: updateCellPayloadSchema,
+    actionPayload: z.preprocess(parseJsonish, updateCellPayloadSchema),
   }),
   confirmActionBaseInputSchema.extend({
     action: z.literal("deleteThread"),
-    actionPayload: deleteThreadPayloadSchema,
+    actionPayload: z.preprocess(parseJsonish, deleteThreadPayloadSchema),
   }),
   confirmActionBaseInputSchema.extend({
     action: z.literal("sendInvites"),
-    actionPayload: sendInvitesPayloadSchema,
+    actionPayload: z.preprocess(parseJsonish, sendInvitesPayloadSchema),
   }),
 ]);
 
