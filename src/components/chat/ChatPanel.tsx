@@ -18,6 +18,7 @@ type ChatPanelProps = {
   isLoading: boolean;
   error: string | null;
   onThreadsRefreshAction?: () => void;
+  onOpenThreadsAction?: () => void;
 };
 
 type ChatPart = UIMessage["parts"][number];
@@ -82,8 +83,19 @@ export function ChatPanel({
   isLoading,
   error,
   onThreadsRefreshAction,
+  onOpenThreadsAction,
 }: ChatPanelProps) {
-  const [input, setInput] = useState("");
+  const threadId = thread?.id ?? "no-thread";
+  const [draftsByThreadId, setDraftsByThreadId] = useState<Record<string, string>>({});
+
+  const input = draftsByThreadId[threadId] ?? "";
+  const setInput = useCallback(
+    (value: string) => {
+      setDraftsByThreadId((current) => ({ ...current, [threadId]: value }));
+    },
+    [threadId]
+  );
+
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
 
   const {
@@ -94,7 +106,7 @@ export function ChatPanel({
     status: chatStatus,
     error: chatError,
   } = useChat({
-    id: thread?.id ?? "no-thread",
+    id: threadId,
     messages: initialMessages,
     transport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
@@ -103,6 +115,34 @@ export function ChatPanel({
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages, setMessages]);
+
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef(true);
+
+  const updateIsAtBottom = useCallback(() => {
+    const container = messageListRef.current;
+    if (!container) {
+      return;
+    }
+
+    const threshold = 96;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    isAtBottomRef.current = distanceFromBottom < threshold;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    if (!messageListRef.current) {
+      return;
+    }
+
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  useEffect(() => {
+    updateIsAtBottom();
+  }, [updateIsAtBottom]);
 
   const previousChatStatusRef = useRef(chatStatus);
 
@@ -124,6 +164,21 @@ export function ChatPanel({
   }, [chatStatus, onThreadsRefreshAction, thread?.id]);
 
   const confirmationTokensRef = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    confirmationTokensRef.current.clear();
+    isAtBottomRef.current = true;
+    previousChatStatusRef.current = "ready";
+
+    const raf = requestAnimationFrame(() => {
+      scrollToBottom("auto");
+      updateIsAtBottom();
+    });
+
+    return () => {
+      cancelAnimationFrame(raf);
+    };
+  }, [scrollToBottom, threadId, updateIsAtBottom]);
 
   const getConfirmationToken = useCallback((toolCallId: string) => {
     const existing = confirmationTokensRef.current.get(toolCallId);
@@ -177,6 +232,44 @@ export function ChatPanel({
         : "Ready";
   const status = error || chatError ? "Error" : loadingMessage ? "Loading" : chatStatusLabel;
 
+  useEffect(() => {
+    if (!isAtBottomRef.current) {
+      return;
+    }
+
+    const behavior: ScrollBehavior = isChatBusy ? "auto" : "smooth";
+    const raf = requestAnimationFrame(() => {
+      scrollToBottom(behavior);
+    });
+
+    return () => {
+      cancelAnimationFrame(raf);
+    };
+  }, [isChatBusy, messages, scrollToBottom]);
+
+  const visibleMessageCount = useMemo(() => {
+    if (!thread) {
+      return 0;
+    }
+
+    if (!isChatBusy) {
+      return messages.length;
+    }
+
+    if (messages.length === 0) {
+      return 0;
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === "assistant") {
+      return Math.max(0, messages.length - 1);
+    }
+
+    return messages.length;
+  }, [isChatBusy, messages, thread]);
+
+  const messageCountLabel = visibleMessageCount === 1 ? "message" : "messages";
+
   const subtitle = error
     ? error
     : chatError
@@ -184,7 +277,7 @@ export function ChatPanel({
       : loadingMessage
         ? loadingMessage
         : thread
-          ? `${messages.length} messages loaded`
+          ? `${visibleMessageCount} ${messageCountLabel}`
           : "Create or select a thread to begin.";
 
   const mainMessage = error
@@ -210,12 +303,13 @@ export function ChatPanel({
       return;
     }
     const nextInput = input.trim();
+    isAtBottomRef.current = true;
     setInput("");
     await sendMessage({ text: nextInput });
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-120px)] flex-1 flex-col gap-6 p-6 lg:h-screen motion-safe:animate-[rise_0.7s_ease-out_0.1s_both]">
+    <section className="flex h-full min-h-0 flex-1 flex-col gap-6 p-6 motion-safe:animate-[rise_0.7s_ease-out_0.1s_both]">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
@@ -226,13 +320,24 @@ export function ChatPanel({
           </h2>
           <p className="mt-2 text-sm text-muted">{subtitle}</p>
         </div>
-        <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-          {status}
-        </span>
+        <div className="flex items-center gap-2">
+          {onOpenThreadsAction ? (
+            <button
+              type="button"
+              onClick={onOpenThreadsAction}
+              className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-foreground transition hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:hidden"
+            >
+              Threads
+            </button>
+          ) : null}
+          <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+            {status}
+          </span>
+        </div>
       </header>
 
-      <div className="flex flex-1 flex-col gap-4">
-        <div className="flex-1 rounded-3xl border border-border bg-surface p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="flex min-h-0 flex-1 flex-col rounded-3xl border border-border bg-surface p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
               <p className="text-base font-medium text-foreground">
@@ -241,11 +346,15 @@ export function ChatPanel({
               <p className="text-sm text-muted">{hint}</p>
             </div>
           ) : (
-            <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
+            <div
+              ref={messageListRef}
+              onScroll={updateIsAtBottom}
+              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2"
+            >
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`rounded-2xl border p-4 ${
+                  className={`w-fit max-w-[92%] rounded-2xl border p-4 shadow-sm lg:max-w-[75%] ${
                     message.role === "user"
                       ? "ml-auto border-accent bg-accent-soft text-accent-ink"
                       : "border-border bg-surface text-foreground"
@@ -254,11 +363,14 @@ export function ChatPanel({
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                     {message.role}
                   </div>
-                  <div className="space-y-3 text-sm">
+                  <div className="space-y-3 text-sm leading-relaxed">
                     {message.parts.map((part, index) => {
                       if (isTextLikePart(part)) {
                         return (
-                          <p key={`${message.id}-part-${index}`}>
+                          <p
+                            key={`${message.id}-part-${index}`}
+                            className="whitespace-pre-wrap break-words"
+                          >
                             {part.text}
                           </p>
                         );
@@ -338,36 +450,62 @@ export function ChatPanel({
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-3xl border border-border bg-surface p-4"
-        >
-          <div className="flex flex-col gap-3">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Type a message to get started..."
-              className="min-h-24 resize-none bg-transparent text-sm text-foreground placeholder:text-muted focus:outline-none"
-              disabled={!thread || isLoading}
-            />
+        {!thread ? (
+          <div className="shrink-0 rounded-3xl border border-dashed border-border bg-surface-muted p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-muted">
-                Mentions: <span className="font-mono">@Sheet1!A1:C5</span>
-              </span>
-              <button
-                type="submit"
-                disabled={!canSend}
-                className="rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition disabled:opacity-60"
-              >
-                Send
-              </button>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
+                  No thread selected
+                </p>
+                <p className="mt-2 text-sm text-muted">
+                  Select or create a thread to start chatting.
+                  <span className="hidden lg:inline"> Choose one from the sidebar.</span>
+                </p>
+              </div>
+              {onOpenThreadsAction ? (
+                <button
+                  type="button"
+                  onClick={onOpenThreadsAction}
+                  className="rounded-full bg-accent-soft px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-accent-ink shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:hidden"
+                >
+                  Threads
+                </button>
+              ) : null}
             </div>
           </div>
-        </form>
+        ) : (
+          <form
+            onSubmit={handleSubmit}
+            className="shrink-0 rounded-3xl border border-border bg-surface p-4 shadow-sm focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-background"
+          >
+            <div className="flex flex-col gap-3">
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Type a message to get started..."
+                className="min-h-24 max-h-40 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-60"
+                disabled={false}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-muted">
+                  Mentions: <span className="font-mono">@Sheet1!A1:C5</span>
+                </span>
+                <button
+                  type="submit"
+                  disabled={!canSend}
+                  className="rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
       </div>
     </section>
   );
