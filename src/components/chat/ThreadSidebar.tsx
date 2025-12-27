@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { unstable_batchedUpdates } from "react-dom";
 
 import {
   createThread,
@@ -11,8 +12,13 @@ import {
 type ThreadSidebarProps = {
   threads: Thread[];
   selectedThreadId: string | null;
-  onSelectAction: (threadId: string) => void;
+  onSelectAction: (
+    threadId: string,
+    options?: { skipMessageLoad?: boolean }
+  ) => void;
   onThreadsChangeAction: (threads: Thread[]) => void;
+  onCloseAction?: () => void;
+  className?: string;
 };
 
 function formatShortDate(timestamp: number): string {
@@ -28,10 +34,15 @@ export function ThreadSidebar({
   selectedThreadId,
   onSelectAction,
   onThreadsChangeAction,
+  onCloseAction,
+  className,
 }: ThreadSidebarProps) {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(() => threads.length === 0);
   const [isCreating, setIsCreating] = useState(false);
+  const [showCreateSpinner, setShowCreateSpinner] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isInitialLoading = isLoading && threads.length === 0;
 
   useEffect(() => {
     let active = true;
@@ -64,23 +75,46 @@ export function ThreadSidebar({
   }, [onThreadsChangeAction]);
 
   const handleCreate = async () => {
+    if (isCreating) {
+      return;
+    }
+
+    const spinnerDelayMs = 200;
+    let spinnerTimeout: ReturnType<typeof setTimeout> | null = null;
+
     try {
       setIsCreating(true);
+      setShowCreateSpinner(false);
       setError(null);
+
+      spinnerTimeout = setTimeout(() => {
+        setShowCreateSpinner(true);
+      }, spinnerDelayMs);
+
       const thread = await createThread();
       const nextThreads = [thread, ...threads];
-      onThreadsChangeAction(nextThreads);
-      onSelectAction(thread.id);
+
+      unstable_batchedUpdates(() => {
+        onThreadsChangeAction(nextThreads);
+        onSelectAction(thread.id, { skipMessageLoad: true });
+        onCloseAction?.();
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create thread";
       setError(message);
     } finally {
+      if (spinnerTimeout) {
+        clearTimeout(spinnerTimeout);
+      }
+      setShowCreateSpinner(false);
       setIsCreating(false);
     }
   };
 
   return (
-    <aside className="relative flex w-full flex-col gap-6 border-b border-border bg-surface p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:h-screen lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out]">
+    <aside
+      className={`relative flex h-full min-h-0 w-full flex-col gap-6 border-b border-border bg-surface p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out] ${className ?? ""}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
@@ -93,42 +127,69 @@ export function ThreadSidebar({
             Organize conversations by intent and data range.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={isCreating}
-          className="rounded-full bg-accent-soft px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-accent-ink transition hover:opacity-90 disabled:opacity-60"
-        >
-          {isCreating ? "Creating" : "New"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={showCreateSpinner}
+            aria-busy={isCreating}
+            className="inline-flex items-center rounded-full bg-accent-soft px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-accent-ink shadow-sm transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
+          >
+            New
+            {showCreateSpinner ? (
+              <span
+                aria-hidden="true"
+                className="ml-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+              />
+            ) : null}
+            {isCreating ? <span className="sr-only">Creating thread</span> : null}
+          </button>
+          {onCloseAction ? (
+            <button
+              type="button"
+              onClick={onCloseAction}
+              className="rounded-full border border-border bg-surface px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-foreground transition hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:hidden"
+            >
+              Close
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {error ? (
           <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-muted">
             {error}
           </div>
         ) : null}
-        {isLoading ? (
-          <div className="space-y-2">
-            <div className="h-10 rounded-xl bg-surface-muted" />
-            <div className="h-10 rounded-xl bg-surface-muted" />
-            <div className="h-10 rounded-xl bg-surface-muted" />
+        {isInitialLoading ? (
+          <div className="space-y-2" aria-busy="true" aria-label="Loading threads">
+            <div className="h-10 rounded-xl bg-surface-muted animate-pulse" />
+            <div className="h-10 rounded-xl bg-surface-muted animate-pulse" />
+            <div className="h-10 rounded-xl bg-surface-muted animate-pulse" />
           </div>
         ) : threads.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-4 text-sm text-muted">
             No threads yet. Start a chat to see history here.
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-2">
             {threads.map((thread) => {
               const isSelected = thread.id === selectedThreadId;
               return (
                 <button
                   key={thread.id}
                   type="button"
-                  onClick={() => onSelectAction(thread.id)}
-                  className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                  onClick={() => {
+                    if (isSelected) {
+                      onCloseAction?.();
+                      return;
+                    }
+
+                    onSelectAction(thread.id);
+                    onCloseAction?.();
+                  }}
+                  className={`w-full rounded-xl border px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                     isSelected
                       ? "border-accent bg-accent-soft text-accent-ink"
                       : "border-border bg-surface text-foreground hover:bg-surface-muted"
