@@ -6,17 +6,21 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
-export async function GET(request: Request, context: RouteContext): Promise<Response> {
+export async function GET(
+  request: Request,
+  context: RouteContext
+): Promise<Response> {
   void request;
 
   try {
-    const threadId = context.params.id;
-    if (!threadId || threadId.trim().length === 0) {
+    const params = await context.params;
+    const threadId = typeof params.id === "string" ? params.id.trim() : "";
+    if (!threadId) {
       return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
     }
 
