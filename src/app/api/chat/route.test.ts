@@ -9,6 +9,7 @@ type GlobalWithDeleteThreadHelper = typeof globalThis & {
 };
 
 let deleteThreadBeforeFinish: string | null = null;
+let capturedSystem: string | null = null;
 
 mock.module("ai", () => {
   let counter = 0;
@@ -17,7 +18,8 @@ mock.module("ai", () => {
     convertToModelMessages: async (messages: any) => messages,
     validateUIMessages: async ({ messages }: any) => messages,
     generateId: () => `gen-${++counter}`,
-    streamText: () => {
+    streamText: ({ system }: any) => {
+      capturedSystem = typeof system === "string" ? system : String(system);
       return {
         toUIMessageStreamResponse: async ({
           originalMessages,
@@ -79,6 +81,7 @@ async function getChatPost() {
 describe("POST /api/chat", () => {
   beforeEach(() => {
     deleteThreadBeforeFinish = null;
+    capturedSystem = null;
     resetDatabase();
   });
 
@@ -158,6 +161,32 @@ describe("POST /api/chat", () => {
     } finally {
       Date.now = realNow;
     }
+  });
+
+  it("prefetches mentioned ranges into the system prompt", async () => {
+    const thread = createThread();
+    const POST = await getChatPost();
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          id: thread.id,
+          messages: [
+            {
+              id: "u1",
+              role: "user",
+              parts: [{ type: "text", text: "Show @Sheet1!A1:B2" }],
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(capturedSystem).toBeTruthy();
+    expect(capturedSystem).toContain("Prefetched spreadsheet context");
+    expect(capturedSystem).toContain("Sheet1!A1:B2");
   });
 
   it("skips persistence when the thread was deleted", async () => {
