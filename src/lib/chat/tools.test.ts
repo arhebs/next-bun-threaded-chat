@@ -1,8 +1,13 @@
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { UIMessage } from "ai";
+
+process.env.DB_PATH = ":memory:";
+
+import { getDb } from "@/lib/db/client";
+import { createThread, getThread } from "@/lib/db/threads";
 
 import { tools } from "@/lib/chat/tools";
 
@@ -41,6 +46,12 @@ function createTempWorkbookCopy(): { workbookPath: string; cleanup: () => void }
 }
 
 describe("chat tools", () => {
+  beforeEach(() => {
+    const db = getDb();
+    db.exec("DELETE FROM messages;");
+    db.exec("DELETE FROM threads;");
+  });
+
   it("sendInvites returns the same emails and message", async () => {
     const execute = (tools.sendInvites as any).execute as (input: any) => Promise<any>;
     const result = await execute({ emails: ["a@example.com"], message: "Hello" });
@@ -150,7 +161,21 @@ describe("chat tools", () => {
     }
   });
 
-  it("deleteThread reaches implementation only after approval", async () => {
+  it("deleteThread requires a matching confirmation", async () => {
+    const execute = (tools.deleteThread as any).execute as (
+      input: any,
+      options: any
+    ) => Promise<any>;
+
+    await expect(
+      execute(
+        { threadId: "thread-1", confirmationToken: "token" },
+        withContext([])
+      )
+    ).rejects.toThrow("Missing confirmation");
+  });
+
+  it("deleteThread rejects denied confirmations", async () => {
     const execute = (tools.deleteThread as any).execute as (
       input: any,
       options: any
@@ -158,7 +183,7 @@ describe("chat tools", () => {
 
     const messages: UIMessage[] = [
       createConfirmMessage({
-        approved: true,
+        approved: false,
         confirmationToken: "token",
         action: "deleteThread",
         actionPayload: { threadId: "thread-1" },
@@ -170,6 +195,32 @@ describe("chat tools", () => {
         { threadId: "thread-1", confirmationToken: "token" },
         withContext(messages)
       )
-    ).rejects.toThrow("deleteThread not implemented");
+    ).rejects.toThrow("Confirmation denied");
+  });
+
+  it("deleteThread deletes the thread after approval", async () => {
+    const execute = (tools.deleteThread as any).execute as (
+      input: any,
+      options: any
+    ) => Promise<any>;
+
+    const thread = createThread();
+
+    const messages: UIMessage[] = [
+      createConfirmMessage({
+        approved: true,
+        confirmationToken: "token",
+        action: "deleteThread",
+        actionPayload: { threadId: thread.id },
+      }),
+    ];
+
+    const result = await execute(
+      { threadId: thread.id, confirmationToken: "token" },
+      withContext(messages)
+    );
+
+    expect(result).toEqual({ threadId: thread.id, deleted: true });
+    expect(getThread(thread.id)).toBeNull();
   });
 });

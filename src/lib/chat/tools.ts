@@ -1,5 +1,6 @@
 import { tool, zodSchema } from "ai";
 
+import { deleteThread as deleteThreadFromDb } from "@/lib/db/threads";
 import { normalizeA1Cell } from "@/lib/xlsx/range";
 import { readRange } from "@/lib/xlsx/read";
 import { loadWorkbook, saveWorkbook } from "@/lib/xlsx/workbook";
@@ -82,7 +83,13 @@ export const tools = {
           threadId: input.threadId,
         },
       });
-      return notImplemented("deleteThread");
+
+      const deleted = deleteThreadFromDb(input.threadId);
+
+      return {
+        threadId: input.threadId,
+        deleted,
+      };
     },
   }),
   sendInvites: tool({

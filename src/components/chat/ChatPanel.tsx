@@ -13,6 +13,7 @@ import type { Thread } from "@/lib/client/api";
 import type {
   ConfirmActionInput,
   ConfirmActionOutput,
+  DeleteThreadOutput,
   ReadRangeOutput,
 } from "@/lib/chat/tool-types";
 
@@ -49,6 +50,15 @@ type ReadRangePart = ChatPart & {
   errorText?: string;
 };
 
+type DeleteThreadPart = ChatPart & {
+  type: "tool-deleteThread";
+  toolCallId: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+};
+
 type ConfirmStatus = "pending" | "approved" | "denied" | "error";
 
 function isTextLikePart(part: ChatPart): part is TextLikePart {
@@ -65,6 +75,10 @@ function isConfirmActionPart(part: ChatPart): part is ConfirmActionPart {
 
 function isReadRangePart(part: ChatPart): part is ReadRangePart {
   return part.type === "tool-readRange";
+}
+
+function isDeleteThreadPart(part: ChatPart): part is DeleteThreadPart {
+  return part.type === "tool-deleteThread";
 }
 
 function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
@@ -86,6 +100,15 @@ function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
   }
 
   return (record.values as unknown[]).every(Array.isArray);
+}
+
+function isDeleteThreadOutput(output: unknown): output is DeleteThreadOutput {
+  if (!output || typeof output !== "object") {
+    return false;
+  }
+
+  const record = output as Record<string, unknown>;
+  return typeof record.threadId === "string" && typeof record.deleted === "boolean";
 }
 
 function formatConfirmAction(action: ConfirmActionInput["action"]): string {
@@ -546,6 +569,101 @@ export function ChatPanel({
                           >
                             <div className="font-semibold uppercase tracking-[0.2em]">
                               Tool: readRange
+                            </div>
+                            <div className="mt-2">Status: {toolState}</div>
+                          </div>
+                        );
+                      }
+                      if (isDeleteThreadPart(part)) {
+                        const output =
+                          "output" in part ? (part.output as unknown) : undefined;
+
+                        if (part.state === "output-error") {
+                          const errorText =
+                            part.errorText ?? "Failed to delete thread.";
+                          return (
+                            <div
+                              key={`${message.id}-part-${index}`}
+                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                            >
+                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+                                Thread delete failed
+                              </div>
+                              <div className="mt-2">{errorText}</div>
+                              {output != null ? (
+                                <div className="mt-3">
+                                  <ToolJsonView payload={output} />
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        }
+
+                        if (output != null) {
+                          const parsed = isDeleteThreadOutput(output)
+                            ? (output as DeleteThreadOutput)
+                            : null;
+                          const deleted = parsed?.deleted ?? false;
+
+                          return (
+                            <div key={`${message.id}-part-${index}`} className="space-y-3">
+                              <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+                                <div className="font-semibold uppercase tracking-[0.2em]">
+                                  Thread deletion
+                                </div>
+                                {parsed ? (
+                                  <div className="mt-2 space-y-1">
+                                    <div>
+                                      Thread:{" "}
+                                      <span className="font-mono text-foreground">
+                                        {parsed.threadId}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      Result:{" "}
+                                      <span
+                                        className={
+                                          deleted
+                                            ? "font-semibold text-foreground"
+                                            : "font-semibold text-muted"
+                                        }
+                                      >
+                                        {deleted ? "Deleted" : "Not found"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mt-2">
+                                    Tool returned an unexpected payload.
+                                  </div>
+                                )}
+
+                                {deleted && onThreadsRefreshAction ? (
+                                  <div className="mt-3">
+                                    <button
+                                      type="button"
+                                      onClick={onThreadsRefreshAction}
+                                      className="rounded-full border border-border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted transition hover:border-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                    >
+                                      Refresh threads
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <ToolJsonView payload={output} />
+                            </div>
+                          );
+                        }
+
+                        const toolState = part.state ?? "unknown";
+
+                        return (
+                          <div
+                            key={`${message.id}-part-${index}`}
+                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                          >
+                            <div className="font-semibold uppercase tracking-[0.2em]">
+                              Tool: deleteThread
                             </div>
                             <div className="mt-2">Status: {toolState}</div>
                           </div>

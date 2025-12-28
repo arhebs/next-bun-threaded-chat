@@ -4,6 +4,12 @@ import type { UIMessage } from "ai";
 process.env.DB_PATH = ":memory:";
 process.env.OPENAI_API_KEY = "test";
 
+type GlobalWithDeleteThreadHelper = typeof globalThis & {
+  __deleteThreadTestHelper?: (threadId: string) => void;
+};
+
+let deleteThreadBeforeFinish: string | null = null;
+
 mock.module("ai", () => {
   let counter = 0;
 
@@ -13,7 +19,11 @@ mock.module("ai", () => {
     generateId: () => `gen-${++counter}`,
     streamText: () => {
       return {
-        toUIMessageStreamResponse: ({ originalMessages, generateMessageId, onFinish }: any) => {
+        toUIMessageStreamResponse: async ({
+          originalMessages,
+          generateMessageId,
+          onFinish,
+        }: any) => {
           const assistantMessage: UIMessage = {
             id: generateMessageId(),
             role: "assistant",
@@ -21,7 +31,15 @@ mock.module("ai", () => {
           };
 
           const finalMessages = [...originalMessages, assistantMessage];
-          onFinish?.({ messages: finalMessages });
+
+          if (deleteThreadBeforeFinish) {
+            (globalThis as GlobalWithDeleteThreadHelper).__deleteThreadTestHelper?.(
+              deleteThreadBeforeFinish
+            );
+            deleteThreadBeforeFinish = null;
+          }
+
+          await onFinish?.({ messages: finalMessages });
 
           return new Response("ok", { status: 200 });
         },
@@ -41,8 +59,11 @@ mock.module("@ai-sdk/openai", () => {
 });
 
 import { getDb } from "@/lib/db/client";
-import { createThread, getThread } from "@/lib/db/threads";
+import { createThread, deleteThread as deleteThreadFromDb, getThread } from "@/lib/db/threads";
 import { loadUIMessages } from "@/lib/db/messages";
+
+(globalThis as GlobalWithDeleteThreadHelper).__deleteThreadTestHelper =
+  deleteThreadFromDb;
 
 function resetDatabase(): void {
   const db = getDb();
@@ -57,6 +78,7 @@ async function getChatPost() {
 
 describe("POST /api/chat", () => {
   beforeEach(() => {
+    deleteThreadBeforeFinish = null;
     resetDatabase();
   });
 
@@ -136,5 +158,32 @@ describe("POST /api/chat", () => {
     } finally {
       Date.now = realNow;
     }
+  });
+
+  it("skips persistence when the thread was deleted", async () => {
+    const thread = createThread();
+    deleteThreadBeforeFinish = thread.id;
+
+    const POST = await getChatPost();
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          id: thread.id,
+          messages: [
+            {
+              id: "u1",
+              role: "user",
+              parts: [{ type: "text", text: "delete" }],
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(getThread(thread.id)).toBeNull();
+    expect(loadUIMessages(thread.id)).toHaveLength(0);
   });
 });

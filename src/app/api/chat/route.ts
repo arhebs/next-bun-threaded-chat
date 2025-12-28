@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { SYSTEM_PROMPT } from "@/lib/chat/prompt";
 import { tools } from "@/lib/chat/tools";
 import { upsertMessages } from "@/lib/db/messages";
-import { setThreadTitleIfEmpty, touchThread } from "@/lib/db/threads";
+import { getThread, setThreadTitleIfEmpty, touchThread } from "@/lib/db/threads";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -224,6 +224,10 @@ export async function POST(request: Request): Promise<Response> {
           writer.write({ type: "finish" });
         },
         onFinish: async ({ messages }) => {
+          if (!getThread(threadId)) {
+            return;
+          }
+
           upsertMessages(threadId, messages);
           touchThread(threadId);
         },
@@ -267,10 +271,15 @@ export async function POST(request: Request): Promise<Response> {
     return result.toUIMessageStreamResponse({
       originalMessages: validated,
       generateMessageId: generateId,
-      onFinish: async ({ messages }) => {
-        upsertMessages(threadId, messages);
-        touchThread(threadId);
-      },
+       onFinish: async ({ messages }) => {
+         if (!getThread(threadId)) {
+           return;
+         }
+
+         upsertMessages(threadId, messages);
+         touchThread(threadId);
+       },
+
     });
   } catch (error) {
     console.error("POST /api/chat failed", error);
