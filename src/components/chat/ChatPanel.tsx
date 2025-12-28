@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useChat } from "@ai-sdk/react";
 
 import { ConfirmationCard } from "@/components/ui/ConfirmationCard";
 import { TableModal } from "@/components/ui/TableModal";
-import { TablePreview } from "@/components/ui/TablePreview";
+import { TablePreview, formatCellValue } from "@/components/ui/TablePreview";
 import { ToolJsonView } from "@/components/ui/ToolJsonView";
 import type { Thread } from "@/lib/client/api";
 import type {
@@ -15,6 +15,7 @@ import type {
   ConfirmActionOutput,
   DeleteThreadOutput,
   ReadRangeOutput,
+  UpdateCellOutput,
 } from "@/lib/chat/tool-types";
 
 type ChatPanelProps = {
@@ -50,6 +51,15 @@ type ReadRangePart = ChatPart & {
   errorText?: string;
 };
 
+type UpdateCellPart = ChatPart & {
+  type: "tool-updateCell";
+  toolCallId: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+};
+
 type DeleteThreadPart = ChatPart & {
   type: "tool-deleteThread";
   toolCallId: string;
@@ -60,6 +70,225 @@ type DeleteThreadPart = ChatPart & {
 };
 
 type ConfirmStatus = "pending" | "approved" | "denied" | "error";
+
+type MarkdownBlock =
+  | { type: "paragraph"; content: string }
+  | { type: "ul"; items: string[] }
+  | { type: "ol"; items: string[] }
+  | { type: "code"; language?: string; content: string };
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  const regex = /`([^`]+)`/g;
+
+  for (const match of text.matchAll(regex)) {
+    if (match.index == null) {
+      continue;
+    }
+
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    const code = match[1] ?? "";
+    nodes.push(
+      <code
+        key={`${keyPrefix}-code-${match.index}`}
+        className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground"
+      >
+        {code}
+      </code>
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+function parseTextLinesToBlocks(lines: string[]): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const unordered = /^\s*[-*+]\s+(.*)$/;
+  const ordered = /^\s*\d+\.\s+(.*)$/;
+
+  let index = 0;
+
+  while (index < lines.length) {
+    while (index < lines.length && (lines[index] ?? "").trim() === "") {
+      index++;
+    }
+
+    if (index >= lines.length) {
+      break;
+    }
+
+    const line = lines[index] ?? "";
+    const unorderedMatch = line.match(unordered);
+    const orderedMatch = line.match(ordered);
+
+    if (unorderedMatch) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const match = (lines[index] ?? "").match(unordered);
+        if (!match) {
+          break;
+        }
+        items.push(match[1] ?? "");
+        index++;
+      }
+      blocks.push({ type: "ul", items });
+      continue;
+    }
+
+    if (orderedMatch) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const match = (lines[index] ?? "").match(ordered);
+        if (!match) {
+          break;
+        }
+        items.push(match[1] ?? "");
+        index++;
+      }
+      blocks.push({ type: "ol", items });
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const current = lines[index] ?? "";
+      if (current.trim() === "") {
+        break;
+      }
+      if (unordered.test(current) || ordered.test(current)) {
+        break;
+      }
+      paragraphLines.push(current);
+      index++;
+    }
+
+    if (paragraphLines.length > 0) {
+      blocks.push({ type: "paragraph", content: paragraphLines.join("\n") });
+    }
+  }
+
+  return blocks;
+}
+
+function parseMarkdownToBlocks(text: string): MarkdownBlock[] {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+
+  const blocks: MarkdownBlock[] = [];
+  const textBuffer: string[] = [];
+
+  const flushText = () => {
+    if (textBuffer.length === 0) {
+      return;
+    }
+    blocks.push(...parseTextLinesToBlocks(textBuffer));
+    textBuffer.length = 0;
+  };
+
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const fence = line.match(/^\s*```(\w+)?\s*$/);
+
+    if (fence) {
+      flushText();
+      const language = fence[1] ? fence[1] : undefined;
+      index++;
+
+      const codeLines: string[] = [];
+      while (index < lines.length) {
+        const current = lines[index] ?? "";
+        if (/^\s*```/.test(current)) {
+          break;
+        }
+        codeLines.push(current);
+        index++;
+      }
+
+      if (index < lines.length && /^\s*```/.test(lines[index] ?? "")) {
+        index++;
+      }
+
+      blocks.push({ type: "code", language, content: codeLines.join("\n") });
+      continue;
+    }
+
+    textBuffer.push(line);
+    index++;
+  }
+
+  flushText();
+  return blocks;
+}
+
+function renderMarkdownBlocks(text: string, keyPrefix: string): ReactNode[] {
+  const blocks = parseMarkdownToBlocks(text);
+
+  return blocks.map((block, index) => {
+    const key = `${keyPrefix}-block-${index}`;
+
+    if (block.type === "paragraph") {
+      return (
+        <p key={key} className="whitespace-pre-wrap break-words">
+          {renderInlineMarkdown(block.content, key)}
+        </p>
+      );
+    }
+
+    if (block.type === "ul") {
+      return (
+        <ul key={key} className="list-disc space-y-1 pl-5">
+          {block.items.map((item, itemIndex) => (
+            <li
+              key={`${key}-item-${itemIndex}`}
+              className="whitespace-pre-wrap break-words"
+            >
+              {renderInlineMarkdown(item, `${key}-item-${itemIndex}`)}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (block.type === "ol") {
+      return (
+        <ol key={key} className="list-decimal space-y-1 pl-5">
+          {block.items.map((item, itemIndex) => (
+            <li
+              key={`${key}-item-${itemIndex}`}
+              className="whitespace-pre-wrap break-words"
+            >
+              {renderInlineMarkdown(item, `${key}-item-${itemIndex}`)}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+
+    return (
+      <div key={key} className="rounded-2xl border border-border bg-surface-muted p-3">
+        {block.language ? (
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+            {block.language}
+          </div>
+        ) : null}
+        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-foreground">
+          <code>{block.content}</code>
+        </pre>
+      </div>
+    );
+  });
+}
 
 function isTextLikePart(part: ChatPart): part is TextLikePart {
   return part.type === "text" || part.type === "reasoning";
@@ -75,6 +304,10 @@ function isConfirmActionPart(part: ChatPart): part is ConfirmActionPart {
 
 function isReadRangePart(part: ChatPart): part is ReadRangePart {
   return part.type === "tool-readRange";
+}
+
+function isUpdateCellPart(part: ChatPart): part is UpdateCellPart {
+  return part.type === "tool-updateCell";
 }
 
 function isDeleteThreadPart(part: ChatPart): part is DeleteThreadPart {
@@ -100,6 +333,29 @@ function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
   }
 
   return (record.values as unknown[]).every(Array.isArray);
+}
+
+function isUpdateCellOutput(output: unknown): output is UpdateCellOutput {
+  if (!output || typeof output !== "object") {
+    return false;
+  }
+
+  const record = output as Record<string, unknown>;
+  if (record.sheet !== "Sheet1") {
+    return false;
+  }
+
+  if (typeof record.cell !== "string") {
+    return false;
+  }
+
+  const value = record.value;
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
 }
 
 function isDeleteThreadOutput(output: unknown): output is DeleteThreadOutput {
@@ -452,12 +708,12 @@ export function ChatPanel({
                     {message.parts.map((part, index) => {
                       if (isTextLikePart(part)) {
                         return (
-                          <p
+                          <div
                             key={`${message.id}-part-${index}`}
-                            className="whitespace-pre-wrap break-words"
+                            className="space-y-3"
                           >
-                            {part.text}
-                          </p>
+                            {renderMarkdownBlocks(part.text, `${message.id}-part-${index}`)}
+                          </div>
                         );
                       }
                       if (isConfirmActionPart(part)) {
@@ -573,6 +829,18 @@ export function ChatPanel({
                         }
 
                         const toolState = part.state ?? "unknown";
+                        const inputRecord =
+                          part.input && typeof part.input === "object"
+                            ? (part.input as Record<string, unknown>)
+                            : null;
+                        const rangeLabel =
+                          typeof inputRecord?.sheet === "string" &&
+                          typeof inputRecord?.range === "string"
+                            ? `${inputRecord.sheet}!${inputRecord.range}`
+                            : null;
+                        const heading = toolState.startsWith("input")
+                          ? "Reading spreadsheet..."
+                          : "Tool: readRange";
 
                         return (
                           <div
@@ -580,8 +848,102 @@ export function ChatPanel({
                             className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
                           >
                             <div className="font-semibold uppercase tracking-[0.2em]">
-                              Tool: readRange
+                              {heading}
                             </div>
+                            {rangeLabel ? (
+                              <div className="mt-2 font-mono text-foreground">
+                                {rangeLabel}
+                              </div>
+                            ) : null}
+                            <div className="mt-2">Status: {toolState}</div>
+                          </div>
+                        );
+                      }
+                      if (isUpdateCellPart(part)) {
+                        const inputRecord =
+                          part.input && typeof part.input === "object"
+                            ? (part.input as Record<string, unknown>)
+                            : null;
+                        const sheetLabel =
+                          typeof inputRecord?.sheet === "string" ? inputRecord.sheet : "Sheet1";
+                        const cellLabel =
+                          typeof inputRecord?.cell === "string" ? inputRecord.cell : null;
+                        const output =
+                          "output" in part ? (part.output as unknown) : undefined;
+
+                        if (part.state === "output-error") {
+                          const errorText =
+                            part.errorText ?? "Failed to update spreadsheet.";
+                          return (
+                            <div
+                              key={`${message.id}-part-${index}`}
+                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                            >
+                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+                                Spreadsheet update failed
+                              </div>
+                              <div className="mt-2">{errorText}</div>
+                              {output != null ? (
+                                <div className="mt-3">
+                                  <ToolJsonView payload={output} />
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        }
+
+                        if (output != null) {
+                          const parsed = isUpdateCellOutput(output)
+                            ? (output as UpdateCellOutput)
+                            : null;
+                          const target = parsed
+                            ? `${parsed.sheet}!${parsed.cell}`
+                            : cellLabel
+                              ? `${sheetLabel}!${cellLabel}`
+                              : "Sheet1 (unknown cell)";
+
+                          return (
+                            <div key={`${message.id}-part-${index}`} className="space-y-3">
+                              <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+                                <div className="font-semibold uppercase tracking-[0.2em]">
+                                  Spreadsheet update
+                                </div>
+                                <div className="mt-2">
+                                  Target:{" "}
+                                  <span className="font-mono text-foreground">
+                                    {target}
+                                  </span>
+                                </div>
+                                {parsed ? (
+                                  <div className="mt-1">
+                                    Value:{" "}
+                                    <span className="font-mono text-foreground">
+                                      {formatCellValue(parsed.value)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <ToolJsonView payload={output} />
+                            </div>
+                          );
+                        }
+
+                        const toolState = part.state ?? "unknown";
+                        const target = cellLabel ? `${sheetLabel}!${cellLabel}` : null;
+
+                        return (
+                          <div
+                            key={`${message.id}-part-${index}`}
+                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                          >
+                            <div className="font-semibold uppercase tracking-[0.2em]">
+                              Updating spreadsheet...
+                            </div>
+                            {target ? (
+                              <div className="mt-2 font-mono text-foreground">
+                                {target}
+                              </div>
+                            ) : null}
                             <div className="mt-2">Status: {toolState}</div>
                           </div>
                         );
