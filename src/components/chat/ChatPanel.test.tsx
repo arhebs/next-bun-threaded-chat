@@ -6,7 +6,7 @@ import { installDom } from "@/test-utils/dom";
 
 installDom();
 
-const { cleanup, render, screen, within } = await import("@testing-library/react");
+const { cleanup, fireEvent, render, screen, within } = await import("@testing-library/react");
 const userEvent = (await import("@testing-library/user-event")).default;
 
 const sendMessageCalls: unknown[] = [];
@@ -207,6 +207,73 @@ describe("ChatPanel", () => {
     expect(within(dialog).getByText("ID")).toBeTruthy();
 
     await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("inserts a mention for a dragged table selection", async () => {
+    const user = userEvent.setup();
+
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-range",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-readRange",
+            toolCallId: "call-range",
+            state: "output-available",
+            output: {
+              sheet: "Sheet1",
+              range: "A1:B2",
+              values: [
+                ["ID", "Name"],
+                [1, "Ava Chen"],
+              ],
+            },
+          } as any,
+        ],
+      },
+    ];
+
+    render(
+      <ChatPanel
+        thread={THREAD}
+        initialMessages={messages}
+        isLoading={false}
+        error={null}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(
+      "Type a message to get started..."
+    ) as HTMLTextAreaElement;
+
+    await user.type(textarea, "Check");
+
+    const preview = screen.getByRole("table", {
+      name: /preview sheet1!a1:b2/i,
+    });
+
+    await user.click(preview);
+
+    const dialog = screen.getByRole("dialog", { name: /sheet1!a1:b2/i });
+
+    const startCell = within(dialog).getByLabelText("Cell A2");
+    const endCell = within(dialog).getByLabelText("Cell B2");
+
+    fireEvent.mouseDown(startCell);
+    fireEvent.mouseEnter(endCell);
+    fireEvent.mouseUp(endCell);
+
+    expect(within(dialog).getByText("@Sheet1!A2:B2")).toBeTruthy();
+
+    const insertButton = within(dialog).getByRole("button", {
+      name: "Insert mention",
+    });
+
+    await user.click(insertButton);
+
+    expect(textarea.value).toBe("Check @Sheet1!A2:B2");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

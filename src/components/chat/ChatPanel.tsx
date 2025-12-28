@@ -138,6 +138,17 @@ export function ChatPanel({
     [threadId]
   );
 
+  const insertMentionAction = useCallback(
+    (mention: string) => {
+      setDraftsByThreadId((current) => {
+        const existing = current[threadId] ?? "";
+        const separator = existing.length === 0 || /\s$/.test(existing) ? "" : " ";
+        return { ...current, [threadId]: `${existing}${separator}${mention}` };
+      });
+    },
+    [threadId]
+  );
+
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
 
   const {
@@ -636,6 +647,7 @@ export function ChatPanel({
           open={true}
           data={readRangeModalOutput}
           onCloseAction={() => setReadRangeModalOutput(null)}
+          onInsertMentionAction={insertMentionAction}
         />
       ) : null}
     </section>

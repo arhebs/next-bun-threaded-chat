@@ -173,6 +173,54 @@ export function parseRange(
   };
 }
 
+export type GridSelection = {
+  startRowIndex: number;
+  startColIndex: number;
+  endRowIndex: number;
+  endColIndex: number;
+};
+
+function assertNonNegativeInteger(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer (got ${value}).`);
+  }
+}
+
+export function selectionToA1Range(baseRange: string, selection: GridSelection): string {
+  const base = parseRange(baseRange);
+
+  assertNonNegativeInteger(selection.startRowIndex, "startRowIndex");
+  assertNonNegativeInteger(selection.startColIndex, "startColIndex");
+  assertNonNegativeInteger(selection.endRowIndex, "endRowIndex");
+  assertNonNegativeInteger(selection.endColIndex, "endColIndex");
+
+  const startRowIndex = Math.min(selection.startRowIndex, selection.endRowIndex);
+  const endRowIndex = Math.max(selection.startRowIndex, selection.endRowIndex);
+  const startColIndex = Math.min(selection.startColIndex, selection.endColIndex);
+  const endColIndex = Math.max(selection.startColIndex, selection.endColIndex);
+
+  const maxRowOffset = base.end.row - base.start.row;
+  const maxColOffset = base.end.col - base.start.col;
+
+  if (endRowIndex > maxRowOffset || endColIndex > maxColOffset) {
+    throw new Error(
+      `Selection exceeds base range ${base.normalized}. Selection end offsets (${endRowIndex}, ${endColIndex}) exceed (${maxRowOffset}, ${maxColOffset}).`
+    );
+  }
+
+  const start = {
+    row: base.start.row + startRowIndex,
+    col: base.start.col + startColIndex,
+  };
+
+  const end = {
+    row: base.start.row + endRowIndex,
+    col: base.start.col + endColIndex,
+  };
+
+  return toA1Range(start, end);
+}
+
 export function normalizeA1Range(range: string): string {
   return parseRange(range).normalized;
 }
