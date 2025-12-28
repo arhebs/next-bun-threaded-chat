@@ -6,10 +6,13 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import { useChat } from "@ai-sdk/react";
 
 import { ConfirmationCard } from "@/components/ui/ConfirmationCard";
+import { TablePreview } from "@/components/ui/TablePreview";
+import { ToolJsonView } from "@/components/ui/ToolJsonView";
 import type { Thread } from "@/lib/client/api";
 import type {
   ConfirmActionInput,
   ConfirmActionOutput,
+  ReadRangeOutput,
 } from "@/lib/chat/tool-types";
 
 type ChatPanelProps = {
@@ -36,6 +39,15 @@ type ConfirmActionPart = ChatPart & {
   errorText?: string;
 };
 
+type ReadRangePart = ChatPart & {
+  type: "tool-readRange";
+  toolCallId: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+};
+
 type ConfirmStatus = "pending" | "approved" | "denied" | "error";
 
 function isTextLikePart(part: ChatPart): part is TextLikePart {
@@ -48,6 +60,31 @@ function isToolLikePart(part: ChatPart): part is ToolPart {
 
 function isConfirmActionPart(part: ChatPart): part is ConfirmActionPart {
   return part.type === "tool-confirmAction";
+}
+
+function isReadRangePart(part: ChatPart): part is ReadRangePart {
+  return part.type === "tool-readRange";
+}
+
+function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
+  if (!output || typeof output !== "object") {
+    return false;
+  }
+
+  const record = output as Record<string, unknown>;
+  if (record.sheet !== "Sheet1") {
+    return false;
+  }
+
+  if (typeof record.range !== "string") {
+    return false;
+  }
+
+  if (!Array.isArray(record.values)) {
+    return false;
+  }
+
+  return (record.values as unknown[]).every(Array.isArray);
 }
 
 function formatConfirmAction(action: ConfirmActionInput["action"]): string {
@@ -87,6 +124,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const threadId = thread?.id ?? "no-thread";
   const [draftsByThreadId, setDraftsByThreadId] = useState<Record<string, string>>({});
+  const [selectedReadRangeToolCallId, setSelectedReadRangeToolCallId] =
+    useState<string | null>(null);
 
   const input = draftsByThreadId[threadId] ?? "";
   const setInput = useCallback(
@@ -167,6 +206,7 @@ export function ChatPanel({
 
   useEffect(() => {
     confirmationTokensRef.current.clear();
+    setSelectedReadRangeToolCallId(null);
     isAtBottomRef.current = true;
     previousChatStatusRef.current = "ready";
 
@@ -414,6 +454,84 @@ export function ChatPanel({
                               }
                               disabled={!isActionable}
                             />
+                          </div>
+                        );
+                      }
+                      if (isReadRangePart(part)) {
+                        const output =
+                          "output" in part ? (part.output as unknown) : undefined;
+
+                        if (part.state === "output-error") {
+                          const errorText =
+                            part.errorText ?? "Failed to read spreadsheet range.";
+                          return (
+                            <div
+                              key={`${message.id}-part-${index}`}
+                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                            >
+                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+                                Range read failed
+                              </div>
+                              <div className="mt-2">{errorText}</div>
+                              {output != null ? (
+                                <div className="mt-3">
+                                  <ToolJsonView payload={output} />
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        }
+
+                        if (output != null) {
+                          const parsed = isReadRangeOutput(output)
+                            ? (output as ReadRangeOutput)
+                            : null;
+                          const rangeLabel = parsed
+                            ? `${parsed.sheet}!${parsed.range}`
+                            : "Sheet1 (unknown range)";
+
+                          return (
+                            <div key={`${message.id}-part-${index}`} className="space-y-3">
+                              {parsed ? (
+                                <>
+                                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+                                    Range{" "}
+                                    <span className="font-mono text-foreground">
+                                      {rangeLabel}
+                                    </span>
+                                  </div>
+                                  <TablePreview
+                                    values={parsed.values}
+                                    selected={
+                                      selectedReadRangeToolCallId === part.toolCallId
+                                    }
+                                    onClick={() =>
+                                      setSelectedReadRangeToolCallId(part.toolCallId)
+                                    }
+                                    ariaLabel={`Preview ${rangeLabel}`}
+                                  />
+                                </>
+                              ) : (
+                                <div className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+                                  Tool returned an unexpected payload.
+                                </div>
+                              )}
+                              <ToolJsonView payload={output} />
+                            </div>
+                          );
+                        }
+
+                        const toolState = part.state ?? "unknown";
+
+                        return (
+                          <div
+                            key={`${message.id}-part-${index}`}
+                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                          >
+                            <div className="font-semibold uppercase tracking-[0.2em]">
+                              Tool: readRange
+                            </div>
+                            <div className="mt-2">Status: {toolState}</div>
                           </div>
                         );
                       }

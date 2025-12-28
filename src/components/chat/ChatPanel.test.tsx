@@ -161,6 +161,45 @@ describe("ChatPanel", () => {
     expect(textareaThread1Again.value).toBe("draft A");
   });
 
+  it("renders readRange output as a table preview and JSON payload", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-range",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-readRange",
+            toolCallId: "call-range",
+            state: "output-available",
+            output: {
+              sheet: "Sheet1",
+              range: "A1:F1",
+              values: [
+                ["ID", "Name", "Email", "Region", "SalesAmount", "Commission"],
+              ],
+            },
+          } as any,
+        ],
+      },
+    ];
+
+    render(
+      <ChatPanel
+        thread={THREAD}
+        initialMessages={messages}
+        isLoading={false}
+        error={null}
+      />
+    );
+
+    expect(screen.getByText("Sheet1!A1:F1")).toBeTruthy();
+    expect(
+      screen.getByRole("table", { name: /preview sheet1!a1:f1/i })
+    ).toBeTruthy();
+    expect(screen.getByText("Tool output (JSON)")).toBeTruthy();
+    expect(screen.getByText(/"range": "A1:F1"/)).toBeTruthy();
+  });
+
   it("emits confirmAction tool output on approve/decline", async () => {
     const user = userEvent.setup();
 
