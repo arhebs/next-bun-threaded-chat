@@ -80,7 +80,6 @@ function main(): void {
   const outputPath = resolveOutputPath();
   writeFileSync(outputPath, buffer);
 
-  // eslint-disable-next-line no-console
   console.log(`Generated ${OUTPUT_RELATIVE_PATH} (${buffer.byteLength} bytes).`);
 }
 
