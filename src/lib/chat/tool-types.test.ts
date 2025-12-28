@@ -1,0 +1,88 @@
+import { describe, expect, it } from "bun:test";
+
+import {
+  confirmActionInputSchema,
+  confirmActionOutputSchema,
+  deleteThreadInputSchema,
+  sheetNameSchema,
+  updateCellInputSchema,
+} from "@/lib/chat/tool-types";
+
+describe("tool-types", () => {
+  it("defaults sheet to Sheet1 for updateCell confirmAction input", () => {
+    const parsed = confirmActionInputSchema.safeParse({
+      action: "updateCell",
+      actionPayload: {
+        cell: "A1",
+        value: 123,
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    expect(parsed.data.action).toBe("updateCell");
+    if (parsed.data.action !== "updateCell") {
+      throw new Error("Expected updateCell action");
+    }
+
+    expect(parsed.data.actionPayload.sheet).toBe("Sheet1");
+    expect(parsed.data.actionPayload.cell).toBe("A1");
+    expect(parsed.data.actionPayload.value).toBe(123);
+  });
+
+  it("accepts JSON string actionPayload and parses booleans/null-ish values", () => {
+    const parsed = confirmActionInputSchema.safeParse({
+      action: "updateCell",
+      actionPayload:
+        "{'cell':'B2','value':True,'sheet':'Sheet1','extra':None}",
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    expect(parsed.data.action).toBe("updateCell");
+    if (parsed.data.action !== "updateCell") {
+      throw new Error("Expected updateCell action");
+    }
+
+    expect(parsed.data.actionPayload.sheet).toBe("Sheet1");
+    expect(parsed.data.actionPayload.cell).toBe("B2");
+    expect(parsed.data.actionPayload.value).toBe(true);
+  });
+
+  it("rejects non-Sheet1 sheets", () => {
+    const parsed = updateCellInputSchema.safeParse({
+      sheet: "Sheet2",
+      cell: "A1",
+      value: "hi",
+      confirmationToken: "token",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("requires confirmationToken for deleteThread tool input", () => {
+    const parsed = deleteThreadInputSchema.safeParse({
+      threadId: "thread",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("validates confirmAction output payload shape", () => {
+    const parsed = confirmActionOutputSchema.safeParse({
+      approved: false,
+      confirmationToken: "token",
+      action: "deleteThread",
+      actionPayload: { threadId: "abc" },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("enforces Sheet1 literal schema", () => {
+    const parsed = sheetNameSchema.safeParse("Sheet1");
+    expect(parsed.success).toBe(true);
+  });
+});
