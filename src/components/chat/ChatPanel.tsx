@@ -6,6 +6,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import { useChat } from "@ai-sdk/react";
 
 import { ConfirmationCard } from "@/components/ui/ConfirmationCard";
+import { TableModal } from "@/components/ui/TableModal";
 import { TablePreview } from "@/components/ui/TablePreview";
 import { ToolJsonView } from "@/components/ui/ToolJsonView";
 import type { Thread } from "@/lib/client/api";
@@ -126,6 +127,8 @@ export function ChatPanel({
   const [draftsByThreadId, setDraftsByThreadId] = useState<Record<string, string>>({});
   const [selectedReadRangeToolCallId, setSelectedReadRangeToolCallId] =
     useState<string | null>(null);
+  const [readRangeModalOutput, setReadRangeModalOutput] =
+    useState<ReadRangeOutput | null>(null);
 
   const input = draftsByThreadId[threadId] ?? "";
   const setInput = useCallback(
@@ -207,6 +210,7 @@ export function ChatPanel({
   useEffect(() => {
     confirmationTokensRef.current.clear();
     setSelectedReadRangeToolCallId(null);
+    setReadRangeModalOutput(null);
     isAtBottomRef.current = true;
     previousChatStatusRef.current = "ready";
 
@@ -505,9 +509,10 @@ export function ChatPanel({
                                     selected={
                                       selectedReadRangeToolCallId === part.toolCallId
                                     }
-                                    onClick={() =>
-                                      setSelectedReadRangeToolCallId(part.toolCallId)
-                                    }
+                                    onClick={() => {
+                                      setSelectedReadRangeToolCallId(part.toolCallId);
+                                      setReadRangeModalOutput(parsed);
+                                    }}
                                     ariaLabel={`Preview ${rangeLabel}`}
                                   />
                                 </>
@@ -625,6 +630,14 @@ export function ChatPanel({
           </form>
         )}
       </div>
+
+      {readRangeModalOutput ? (
+        <TableModal
+          open={true}
+          data={readRangeModalOutput}
+          onCloseAction={() => setReadRangeModalOutput(null)}
+        />
+      ) : null}
     </section>
   );
 }

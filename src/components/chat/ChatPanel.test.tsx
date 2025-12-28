@@ -6,7 +6,7 @@ import { installDom } from "@/test-utils/dom";
 
 installDom();
 
-const { cleanup, render, screen } = await import("@testing-library/react");
+const { cleanup, render, screen, within } = await import("@testing-library/react");
 const userEvent = (await import("@testing-library/user-event")).default;
 
 const sendMessageCalls: unknown[] = [];
@@ -161,7 +161,9 @@ describe("ChatPanel", () => {
     expect(textareaThread1Again.value).toBe("draft A");
   });
 
-  it("renders readRange output as a table preview and JSON payload", () => {
+  it("opens a table modal when clicking the readRange preview", async () => {
+    const user = userEvent.setup();
+
     const messages: UIMessage[] = [
       {
         id: "assistant-range",
@@ -193,11 +195,19 @@ describe("ChatPanel", () => {
     );
 
     expect(screen.getByText("Sheet1!A1:F1")).toBeTruthy();
-    expect(
-      screen.getByRole("table", { name: /preview sheet1!a1:f1/i })
-    ).toBeTruthy();
-    expect(screen.getByText("Tool output (JSON)")).toBeTruthy();
-    expect(screen.getByText(/"range": "A1:F1"/)).toBeTruthy();
+    const preview = screen.getByRole("table", {
+      name: /preview sheet1!a1:f1/i,
+    });
+    expect(preview).toBeTruthy();
+
+    await user.click(preview);
+
+    const dialog = screen.getByRole("dialog", { name: /sheet1!a1:f1/i });
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByText("ID")).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("emits confirmAction tool output on approve/decline", async () => {
