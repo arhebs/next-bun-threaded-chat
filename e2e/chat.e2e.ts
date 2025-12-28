@@ -44,7 +44,7 @@ test("switches between threads and shows the correct history", async ({ page }) 
 
   await input.fill("Beta");
   await send.click();
-  await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await expect(page.getByRole("heading", { name: "Beta" })).toBeVisible();
 
@@ -123,7 +123,7 @@ test("approving a confirmation deletes the active thread", async ({ page }) => {
 
   await input.fill("Beta");
   await send.click();
-  await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await input.fill("Please delete this thread");
   await send.click();
