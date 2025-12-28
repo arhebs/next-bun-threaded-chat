@@ -22,11 +22,13 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Security Notes
 
-This project uses the `xlsx` package, which has known security advisories in the 0.18.x line.
-For this assignment, treat XLSX handling as trusted-local only:
-- Use only the bundled `data/example.xlsx` (no user uploads).
-- Validate sheet names and A1 ranges strictly.
-- Enforce a hard limit on range size before reading/writing.
+See `SECURITY.md` for details.
+
+This project uses the `xlsx` package (`0.18.5`), which has known advisories (e.g. CVE-2023-30533, CVE-2024-22363).
+For this assignment, XLSX handling is intentionally **trusted-local only**:
+- Only the bundled `data/example.xlsx` is read/written (no uploads, no user-controlled paths).
+- Sheet names and A1 ranges are validated strictly.
+- Ranges are capped (see `MAX_RANGE_CELLS` in `src/lib/xlsx/range.ts`).
 
 ## Learn More
 
