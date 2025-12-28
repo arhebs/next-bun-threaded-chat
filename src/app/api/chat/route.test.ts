@@ -25,7 +25,51 @@ mock.module("ai", () => {
       throw new Error("createUIMessageStreamResponse is not mocked for this test");
     },
     convertToModelMessages: async (messages: any) => messages,
-    validateUIMessages: async ({ messages }: any) => messages,
+    validateUIMessages: async ({ messages, tools }: any) => {
+      if (!Array.isArray(messages)) {
+        throw new Error("messages must be an array");
+      }
+
+      for (const message of messages) {
+        if (!message || typeof message !== "object") {
+          throw new Error("message must be an object");
+        }
+
+        const record = message as Record<string, unknown>;
+        const parts = record.parts;
+        if (!Array.isArray(parts) || parts.length === 0) {
+          throw new Error("message.parts must be a non-empty array");
+        }
+
+        for (const part of parts) {
+          if (!part || typeof part !== "object") {
+            continue;
+          }
+
+          const partRecord = part as Record<string, unknown>;
+          const type = partRecord.type;
+          if (typeof type !== "string" || !type.startsWith("tool-")) {
+            continue;
+          }
+
+          const toolName = type.slice("tool-".length);
+          const tool = (tools as Record<string, any> | undefined)?.[toolName];
+          if (!tool) {
+            throw new Error(`Unknown tool: ${toolName}`);
+          }
+
+          if ("input" in partRecord && tool.inputSchema?.parse) {
+            tool.inputSchema.parse(partRecord.input);
+          }
+
+          if ("output" in partRecord && tool.outputSchema?.parse) {
+            tool.outputSchema.parse(partRecord.output);
+          }
+        }
+      }
+
+      return messages;
+    },
     generateId: () => `gen-${++counter}`,
     streamText: ({ system }: any) => {
       capturedSystem = typeof system === "string" ? system : String(system);

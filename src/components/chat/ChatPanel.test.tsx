@@ -37,18 +37,6 @@ mock.module("@ai-sdk/react", () => {
   };
 });
 
-mock.module("ai", () => {
-  class DefaultChatTransport {
-    constructor(_opts: unknown) {
-      void _opts;
-    }
-  }
-
-  return {
-    DefaultChatTransport,
-    lastAssistantMessageIsCompleteWithToolCalls: () => true,
-  };
-});
 
 const { ChatPanel } = await import("@/components/chat/ChatPanel");
 

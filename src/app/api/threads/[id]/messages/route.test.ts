@@ -49,4 +49,44 @@ describe("GET /api/threads/:id/messages", () => {
     expect(body.messages[0].id).toBe("u1");
     expect(body.messages[1].id).toBe("a1");
   });
+
+  it("returns 500 when stored messages fail tool validation", async () => {
+    const previousConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const thread = createThread();
+
+      const messages: UIMessage[] = [
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-readRange",
+              toolCallId: "call-1",
+              state: "output-available",
+              output: {
+                sheet: "Sheet1",
+                range: "A1",
+                values: "not-a-2d-array",
+              },
+            } as any,
+          ],
+        } as any,
+      ];
+
+      upsertMessages(thread.id, messages);
+
+      const response = await GET(new Request("http://localhost"), {
+        params: Promise.resolve({ id: thread.id }),
+      });
+
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body).toEqual({ error: "Failed to load messages" });
+    } finally {
+      console.error = previousConsoleError;
+    }
+  });
 });
