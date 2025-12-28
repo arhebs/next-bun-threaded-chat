@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ request }) => {
@@ -69,6 +72,41 @@ test("switches between threads and shows the correct history", async ({ page }) 
       .getByRole("log", { name: "Chat messages" })
       .getByText("Beta", { exact: true })
   ).toBeVisible();
+});
+
+test("persists threads and messages across a page reload", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "New" }).click();
+
+  const input = page.getByPlaceholder("Type a message to get started...");
+  const send = page.getByRole("button", { name: "Send" });
+
+  await input.fill("Hello");
+  await expect(send).toBeEnabled();
+  await send.click();
+
+  await expect(page.getByText("Mock response.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Hello/ })).toBeVisible({
+    timeout: 15000,
+  });
+
+  const dbFile = resolve(process.cwd(), "test-results/playwright.sqlite");
+  expect(existsSync(dbFile)).toBe(true);
+  const sqliteHeader = readFileSync(dbFile).toString("utf8", 0, 15);
+  expect(sqliteHeader).toBe("SQLite format 3");
+
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: /Hello/ })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByRole("heading", { name: "Hello" })).toBeVisible();
+
+  const chatLog = page.getByRole("log", { name: "Chat messages" });
+
+  await expect(chatLog.getByText("Hello", { exact: true })).toBeVisible();
+  await expect(chatLog.getByText("Mock response.")).toBeVisible();
 });
 
 test("opens a table modal and inserts a mention from selection", async ({

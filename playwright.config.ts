@@ -17,7 +17,7 @@ export default defineConfig({
     env: {
       PLAYWRIGHT: "1",
       MOCK_CHAT: "1",
-      DB_PATH: ":memory:",
+      DB_PATH: "test-results/playwright.sqlite",
     },
   },
   projects: [
