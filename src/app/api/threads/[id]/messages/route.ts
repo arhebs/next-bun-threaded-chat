@@ -104,14 +104,12 @@ function assertToolPartsAreValid(messages: unknown): void {
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   context: RouteContext
 ): Promise<Response> {
-  void request;
-
   try {
     const params = await context.params;
-    const threadId = typeof params.id === "string" ? params.id.trim() : "";
+    const threadId = params.id.trim();
     if (!threadId) {
       return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
     }

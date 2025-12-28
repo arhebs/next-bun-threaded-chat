@@ -78,6 +78,8 @@ export function upsertMessages(threadId: string, messages: UIMessage[]): void {
   const db = getDb();
 
   db.exec("BEGIN;");
+
+  let committed = false;
   try {
     const selectExisting = db.query<ExistingMessageRow>(
       "SELECT thread_id, created_at FROM messages WHERE id = ?"
@@ -121,13 +123,15 @@ export function upsertMessages(threadId: string, messages: UIMessage[]): void {
     }
 
     db.exec("COMMIT;");
-  } catch (error) {
-    try {
-      db.exec("ROLLBACK;");
-    } catch {
-      // ignore rollback errors
+    committed = true;
+  } finally {
+    if (!committed) {
+      try {
+        db.exec("ROLLBACK;");
+      } catch {
+        // ignore rollback errors
+      }
     }
-    throw error;
   }
 }
 

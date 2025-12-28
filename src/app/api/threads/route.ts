@@ -19,7 +19,7 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  void request;
+  request.headers.get("content-type");
 
   try {
     const thread = createThread();

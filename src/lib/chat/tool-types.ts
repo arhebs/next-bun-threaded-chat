@@ -17,7 +17,7 @@ function createNormalizedSchema(
         return normalize(value);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Invalid value";
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+        ctx.addIssue({ code: "custom", message });
         return z.NEVER;
       }
     })

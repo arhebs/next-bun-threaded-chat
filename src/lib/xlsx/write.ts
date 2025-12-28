@@ -109,8 +109,7 @@ export function updateCell(input: {
     };
   }
 
-  const cellObject = buildCellObject(input.value);
-  (worksheet as Record<string, unknown>)[normalizedCell] = cellObject;
+  (worksheet as Record<string, unknown>)[normalizedCell] = buildCellObject(input.value);
   ensureSheetRefIncludesCell(worksheet, parsedCell.row, parsedCell.col);
 
   return {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
+import { formatCellValue } from "@/components/ui/TablePreview";
 import type { ReadRangeOutput } from "@/lib/chat/tool-types";
 import {
   columnNumberToLetters,
@@ -30,22 +31,6 @@ type TableModalProps = {
   onCloseAction: () => void;
   onInsertMentionAction: (mention: string) => void;
 };
-
-function formatCellValue(value: CellValue): string {
-  if (value == null) {
-    return "";
-  }
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value.toLocaleString() : String(value);
-  }
-
-  return value ? "true" : "false";
-}
 
 export function TableModal({
   open,

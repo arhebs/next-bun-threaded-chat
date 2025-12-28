@@ -10,7 +10,7 @@ type TablePreviewProps = {
   ariaLabel?: string;
 };
 
-function formatCellValue(value: CellValue): string {
+export function formatCellValue(value: CellValue): string {
   if (value == null) {
     return "";
   }
