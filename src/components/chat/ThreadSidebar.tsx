@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { unstable_batchedUpdates } from "react-dom";
 
 import {
@@ -29,6 +29,43 @@ function formatShortDate(timestamp: number): string {
   return date.toLocaleDateString();
 }
 
+function mergeThreads(current: Thread[], incoming: Thread[]): Thread[] {
+  const byId = new Map<string, Thread>();
+
+  const consider = (thread: Thread) => {
+    const existing = byId.get(thread.id);
+    if (!existing) {
+      byId.set(thread.id, thread);
+      return;
+    }
+
+    if (thread.updatedAt > existing.updatedAt) {
+      byId.set(thread.id, thread);
+      return;
+    }
+
+    if (thread.updatedAt === existing.updatedAt && !existing.title && thread.title) {
+      byId.set(thread.id, thread);
+    }
+  };
+
+  for (const thread of current) {
+    consider(thread);
+  }
+
+  for (const thread of incoming) {
+    consider(thread);
+  }
+
+  return Array.from(byId.values()).sort((left, right) => {
+    const diff = right.updatedAt - left.updatedAt;
+    if (diff !== 0) {
+      return diff;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
 export function ThreadSidebar({
   threads,
   selectedThreadId,
@@ -42,6 +79,9 @@ export function ThreadSidebar({
   const [showCreateSpinner, setShowCreateSpinner] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+
   const isInitialLoading = isLoading && threads.length === 0;
 
   useEffect(() => {
@@ -53,7 +93,9 @@ export function ThreadSidebar({
     listThreads()
       .then((data) => {
         if (active) {
-          onThreadsChangeAction(data);
+          const merged = mergeThreads(threadsRef.current, data);
+          threadsRef.current = merged;
+          onThreadsChangeAction(merged);
         }
       })
       .catch((err) => {
@@ -92,7 +134,8 @@ export function ThreadSidebar({
       }, spinnerDelayMs);
 
       const thread = await createThread();
-      const nextThreads = [thread, ...threads];
+      const nextThreads = mergeThreads([thread], threadsRef.current);
+      threadsRef.current = nextThreads;
 
       unstable_batchedUpdates(() => {
         onThreadsChangeAction(nextThreads);
