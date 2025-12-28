@@ -1,6 +1,8 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   generateId,
   streamText,
   validateUIMessages,
@@ -76,6 +78,69 @@ function deriveThreadTitle(messages: UIMessage[]): string | null {
   return `${normalized.slice(0, maxLength).trimEnd()}...`;
 }
 
+function isMockChatEnabled(): boolean {
+  return readEnv("MOCK_CHAT") === "1" || readEnv("PLAYWRIGHT") === "1";
+}
+
+function extractLastUserText(messages: UIMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    return message.parts
+      .filter((part): part is TextPart => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+      .trim();
+  }
+
+  return "";
+}
+
+type ConfirmDecision = {
+  approved: boolean;
+};
+
+function extractLatestConfirmDecision(messages: UIMessage[]): ConfirmDecision | null {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = message.parts[partIndex] as unknown;
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+
+      const record = part as Record<string, unknown>;
+      if (record.type !== "tool-confirmAction") {
+        continue;
+      }
+
+      if (!("output" in record)) {
+        continue;
+      }
+
+      const output = record.output;
+      if (!output || typeof output !== "object") {
+        continue;
+      }
+
+      if (!("approved" in output)) {
+        continue;
+      }
+
+      const approved = (output as { approved?: unknown }).approved;
+      if (typeof approved === "boolean") {
+        return { approved };
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const body = (await request.json()) as ChatRequestBody;
@@ -111,6 +176,60 @@ export async function POST(request: Request): Promise<Response> {
     const title = deriveThreadTitle(validated);
     if (title) {
       setThreadTitleIfEmpty(threadId, title);
+    }
+
+    if (isMockChatEnabled()) {
+      const decision = extractLatestConfirmDecision(validated);
+      const lastUserText = extractLastUserText(validated);
+      const shouldContinue = validated[validated.length - 1]?.role === "assistant";
+
+      const stream = createUIMessageStream({
+        originalMessages: validated,
+        generateId,
+        execute: ({ writer }) => {
+          if (shouldContinue) {
+            writer.write({ type: "start" });
+          } else {
+            writer.write({ type: "start", messageId: generateId() });
+          }
+
+          writer.write({ type: "start-step" });
+
+          const writeText = (text: string) => {
+            const textId = generateId();
+            writer.write({ type: "text-start", id: textId });
+            writer.write({ type: "text-delta", id: textId, delta: text });
+            writer.write({ type: "text-end", id: textId });
+          };
+
+          if (decision) {
+            writeText(decision.approved ? "Action confirmed." : "Action canceled.");
+          } else if (/\bdelete\b/i.test(lastUserText)) {
+            writeText("I need your confirmation before deleting.");
+            writer.write({
+              type: "tool-input-available",
+              toolCallId: generateId(),
+              toolName: "confirmAction",
+              input: {
+                action: "deleteThread",
+                actionPayload: { threadId },
+                prompt: "Delete this thread?",
+              },
+            });
+          } else {
+            writeText("Mock response.");
+          }
+
+          writer.write({ type: "finish-step" });
+          writer.write({ type: "finish" });
+        },
+        onFinish: async ({ messages }) => {
+          upsertMessages(threadId, messages);
+          touchThread(threadId);
+        },
+      });
+
+      return createUIMessageStreamResponse({ stream });
     }
 
     const modelMessages = await convertToModelMessages(validated, {
