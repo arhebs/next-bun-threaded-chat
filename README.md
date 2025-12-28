@@ -1,46 +1,122 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Threaded Sheet Chat (Next.js + Bun)
 
-## Getting Started
+A demo / assignment app: ChatGPT-style UI with threaded conversations, SQLite persistence (via Bun), and spreadsheet tools over a bundled XLSX.
 
-First, run the development server:
+## Features
+
+- Threaded conversations stored in SQLite (create/switch threads; history loads per thread).
+- Streaming chat via Vercel AI SDK UI (`useChat`) + server streaming route (`POST /api/chat`).
+- Spreadsheet tools for the bundled workbook at `data/example.xlsx` (Sheet1 only):
+  - Read ranges and render previews + modal selection → mention insertion (`@Sheet1!A1:C5`).
+  - Update individual cells (writes back to `data/example.xlsx`) — gated behind explicit UI confirmation.
+  - Explain formulas (reads formula text from a cell).
+  - Mock “send invites” tool.
+- Dangerous actions (cell edits, thread deletion) require confirmation tokens.
+
+## Requirements
+
+- Bun `>= 1.3`.
+- Optional: an OpenAI API key if you want real model responses.
+
+## Quickstart
+
+### 1) Install dependencies
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2) Configure environment
 
-You can start editing the page by modifying `src/app/page.tsx`. The page auto-updates as you edit the file.
+Copy `.env.example` → `.env.local` and choose one of the modes below.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+#### Option A: Run with no API key (mock chat)
 
-## Security Notes
+Set:
 
-See `SECURITY.md` for details.
+```bash
+MOCK_CHAT=1
+DB_PATH=data/app.sqlite
+```
 
-This project uses the `xlsx` package (`0.18.5`), which has known advisories (e.g. CVE-2023-30533, CVE-2024-22363).
-For this assignment, XLSX handling is intentionally **trusted-local only**:
-- Only the bundled `data/example.xlsx` is read/written (no uploads, no user-controlled paths).
-- Sheet names and A1 ranges are validated strictly.
-- Ranges are capped (see `MAX_RANGE_CELLS` in `src/lib/xlsx/range.ts`).
+No OpenAI calls are made; the UI, tool rendering, thread persistence, and confirmation flows still work.
 
-## Learn More
+#### Option B: Run with a real model
 
-To learn more about Next.js, take a look at the following resources:
+Set at minimum:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+OPENAI_API_KEY=...
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Make sure `MOCK_CHAT` is not set to `1` (unset it or set it to `0`) so the server uses the real model.
 
-## Deploy on Vercel
+Optional:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `OPENAI_BASE_URL` (OpenAI-compatible providers like OpenRouter)
+- `OPENAI_MODEL` (defaults to `gpt-4o-mini`)
+- `OPENAI_API_MODE` (`chat` vs `responses`)
+- `OPENAI_REFERER`, `OPENAI_TITLE` (useful for OpenRouter attribution)
+- `DB_PATH` (SQLite file location; defaults to `data/app.sqlite`)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 3) Start the dev server
+
+```bash
+bun run dev
+```
+
+Open `http://localhost:3000`.
+
+## Data & initialization
+
+### SQLite
+
+- Default DB file: `data/app.sqlite` (override via `DB_PATH`).
+- Schema is created automatically on first use (`CREATE TABLE IF NOT EXISTS ...`).
+- Local sqlite files are ignored by git (`data/*.sqlite*`).
+
+### Workbook (`data/example.xlsx`)
+
+- Bundled workbook: `data/example.xlsx` (single sheet: `Sheet1`).
+- If you need to regenerate it:
+
+```bash
+bun run scripts/generate-example-xlsx.ts
+```
+
+## Using the app
+
+- Create/select threads from the sidebar.
+- Mention ranges in chat like `@Sheet1!A1:C5` to reference spreadsheet data.
+- When the assistant reads a range, you’ll see a preview card; click it to open a modal grid.
+  - Drag to select a sub-range and click “Insert mention” to add it to your draft.
+- When the assistant proposes a cell update or thread deletion, approve/decline in the confirmation card.
+
+## Testing
+
+```bash
+bun test
+bun run typecheck
+bun run lint
+```
+
+### Playwright e2e
+
+```bash
+bunx playwright install
+bun run test:e2e
+# or
+bun run test:e2e:ui
+```
+
+E2E runs with `PLAYWRIGHT=1` + `MOCK_CHAT=1` and uses `DB_PATH=test-results/playwright.sqlite` (no API key required).
+
+## Limitations / notes
+
+- SheetJS (`xlsx`) does not recalculate formulas server-side. Formula cells may show cached/stale values until the file is opened in Excel.
+- Writing to `data/example.xlsx` assumes a writable filesystem. This is fine for a local assignment, but not serverless-safe without external storage.
+- XLSX is trusted-local only (no uploads, no user-controlled paths). Only `Sheet1` is supported and ranges are capped.
+
+## Security
+
+See `SECURITY.md` for details and rationale around using `xlsx` in a trusted-local-only way.
