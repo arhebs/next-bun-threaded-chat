@@ -1,15 +1,38 @@
 import { z } from "zod";
 
+import { normalizeA1Cell, normalizeA1Range } from "@/lib/xlsx/range";
+
 export const sheetNameSchema = z.literal("Sheet1");
 const sheetNameInputSchema = sheetNameSchema.default("Sheet1");
-export const a1RangeSchema = z
-  .string()
-  .min(1)
-  .describe("A1 range like A1:C5");
-export const a1CellSchema = z
-  .string()
-  .min(1)
-  .describe("A1 cell like B2");
+
+function createNormalizedSchema(
+  description: string,
+  normalize: (value: string) => string
+) {
+  return z
+    .string()
+    .min(1)
+    .transform((value, ctx) => {
+      try {
+        return normalize(value);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid value";
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+        return z.NEVER;
+      }
+    })
+    .describe(description);
+}
+
+export const a1RangeSchema = createNormalizedSchema(
+  "A1 range like A1:C5",
+  normalizeA1Range
+);
+
+export const a1CellSchema = createNormalizedSchema(
+  "A1 cell like B2",
+  normalizeA1Cell
+);
 
 export const cellValueSchema = z.union([
   z.string(),

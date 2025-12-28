@@ -1,5 +1,10 @@
 import { tool, zodSchema } from "ai";
 
+import { normalizeA1Cell } from "@/lib/xlsx/range";
+import { readRange } from "@/lib/xlsx/read";
+import { loadWorkbook, saveWorkbook } from "@/lib/xlsx/workbook";
+import { updateCell } from "@/lib/xlsx/write";
+
 import { assertConfirmed, getContextMessages } from "./confirm-gate";
 import {
   confirmActionInputSchema,
@@ -31,7 +36,7 @@ export const tools = {
     description: "Read a Sheet1 A1 range and return its values.",
     inputSchema: zodSchema(readRangeInputSchema),
     outputSchema: zodSchema(readRangeOutputSchema),
-    execute: async () => notImplemented("readRange"),
+    execute: async (input) => readRange({ sheet: input.sheet, range: input.range }),
   }),
   updateCell: tool({
     description: "Update a single cell in Sheet1 (requires confirmation).",
@@ -48,7 +53,20 @@ export const tools = {
           value: input.value,
         },
       });
-      return notImplemented("updateCell");
+
+      const result = updateCell({
+        sheet: input.sheet,
+        cell: input.cell,
+        value: input.value,
+      });
+
+      saveWorkbook(result.workbook);
+
+      return {
+        sheet: result.sheet,
+        cell: result.cell,
+        value: result.value,
+      };
     },
   }),
   deleteThread: tool({
@@ -80,6 +98,26 @@ export const tools = {
     description: "Explain the formula in a given Sheet1 cell.",
     inputSchema: zodSchema(explainFormulaInputSchema),
     outputSchema: zodSchema(explainFormulaOutputSchema),
-    execute: async () => notImplemented("explainFormula"),
+    execute: async (input) => {
+      const workbook = loadWorkbook();
+      const worksheet = workbook.Sheets[input.sheet];
+      if (!worksheet) {
+        throw new Error(`Workbook is missing required sheet ${input.sheet}.`);
+      }
+
+      const normalizedCell = normalizeA1Cell(input.cell);
+      const cell = (worksheet as Record<string, unknown>)[normalizedCell] as
+        | { f?: unknown }
+        | undefined;
+      const formula = typeof cell?.f === "string" ? cell.f.trim() : "";
+
+      if (!formula) {
+        throw new Error(`No formula found in ${input.sheet}!${normalizedCell}.`);
+      }
+
+      return {
+        formula: formula.startsWith("=") ? formula : `=${formula}`,
+      };
+    },
   }),
 };

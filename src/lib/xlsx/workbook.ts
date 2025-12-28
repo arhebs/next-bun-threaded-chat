@@ -2,26 +2,34 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
 
-const WORKBOOK_RELATIVE_PATH = "data/example.xlsx";
+const DEFAULT_WORKBOOK_PATH = "data/example.xlsx";
 
-function resolveWorkbookPath(): string {
-  const resolved = path.resolve(process.cwd(), WORKBOOK_RELATIVE_PATH);
-  mkdirSync(path.dirname(resolved), { recursive: true });
-  return resolved;
+function resolveWorkbookPath(): { resolvedPath: string; configuredPath: string } {
+  const envPath = process.env.XLSX_PATH?.trim();
+  const configuredPath = envPath && envPath.length > 0 ? envPath : DEFAULT_WORKBOOK_PATH;
+  const resolvedPath = path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.resolve(process.cwd(), configuredPath);
+
+  mkdirSync(path.dirname(resolvedPath), { recursive: true });
+
+  return { resolvedPath, configuredPath };
 }
 
 export function loadWorkbook(): XLSX.WorkBook {
-  const workbookPath = resolveWorkbookPath();
+  const { resolvedPath, configuredPath } = resolveWorkbookPath();
 
   let buffer: Uint8Array;
   try {
-    buffer = readFileSync(workbookPath);
+    buffer = readFileSync(resolvedPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Failed to read workbook at ${WORKBOOK_RELATIVE_PATH}: ${message}. ` +
-        "Run Step 18 to generate the bundled spreadsheet."
-    );
+    const hint =
+      configuredPath === DEFAULT_WORKBOOK_PATH
+        ? "Run Step 18 to generate the bundled spreadsheet."
+        : "Check XLSX_PATH and file permissions.";
+
+    throw new Error(`Failed to read workbook at ${configuredPath}: ${message}. ${hint}`);
   }
 
   try {
@@ -32,14 +40,12 @@ export function loadWorkbook(): XLSX.WorkBook {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Failed to parse workbook at ${WORKBOOK_RELATIVE_PATH}: ${message}`
-    );
+    throw new Error(`Failed to parse workbook at ${configuredPath}: ${message}`);
   }
 }
 
 export function saveWorkbook(workbook: XLSX.WorkBook): void {
-  const workbookPath = resolveWorkbookPath();
+  const { resolvedPath, configuredPath } = resolveWorkbookPath();
   const data = XLSX.write(workbook, {
     type: "buffer",
     bookType: "xlsx",
@@ -49,5 +55,10 @@ export function saveWorkbook(workbook: XLSX.WorkBook): void {
     throw new Error("XLSX.write did not return a binary buffer.");
   }
 
-  writeFileSync(workbookPath, data);
+  try {
+    writeFileSync(resolvedPath, data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write workbook at ${configuredPath}: ${message}`);
+  }
 }
