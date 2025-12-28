@@ -66,12 +66,6 @@ export function TableModal({
   const [selectionEnd, setSelectionEnd] = useState<GridPoint | null>(null);
 
   useEffect(() => {
-    setIsDragging(false);
-    setSelectionStart(null);
-    setSelectionEnd(null);
-  }, [open, data.sheet, parsedRange.normalized]);
-
-  useEffect(() => {
     if (!isDragging) {
       return;
     }

@@ -148,10 +148,17 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const threadId = thread?.id ?? "no-thread";
   const [draftsByThreadId, setDraftsByThreadId] = useState<Record<string, string>>({});
-  const [selectedReadRangeToolCallId, setSelectedReadRangeToolCallId] =
-    useState<string | null>(null);
-  const [readRangeModalOutput, setReadRangeModalOutput] =
-    useState<ReadRangeOutput | null>(null);
+  const [readRangeUiByThreadId, setReadRangeUiByThreadId] = useState<
+    Record<
+      string,
+      { selectedToolCallId: string | null; modalOutput: ReadRangeOutput | null }
+    >
+  >({});
+
+  const currentReadRangeUi = readRangeUiByThreadId[threadId];
+  const selectedReadRangeToolCallId =
+    currentReadRangeUi?.selectedToolCallId ?? null;
+  const readRangeModalOutput = currentReadRangeUi?.modalOutput ?? null;
 
   const input = draftsByThreadId[threadId] ?? "";
   const setInput = useCallback(
@@ -243,8 +250,6 @@ export function ChatPanel({
 
   useEffect(() => {
     confirmationTokensRef.current.clear();
-    setSelectedReadRangeToolCallId(null);
-    setReadRangeModalOutput(null);
     isAtBottomRef.current = true;
     previousChatStatusRef.current = "ready";
 
@@ -426,6 +431,8 @@ export function ChatPanel({
           ) : (
             <div
               ref={messageListRef}
+              role="log"
+              aria-label="Chat messages"
               onScroll={updateIsAtBottom}
               className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2"
             >
@@ -544,8 +551,13 @@ export function ChatPanel({
                                       selectedReadRangeToolCallId === part.toolCallId
                                     }
                                     onClick={() => {
-                                      setSelectedReadRangeToolCallId(part.toolCallId);
-                                      setReadRangeModalOutput(parsed);
+                                      setReadRangeUiByThreadId((current) => ({
+                                        ...current,
+                                        [threadId]: {
+                                          selectedToolCallId: part.toolCallId,
+                                          modalOutput: parsed,
+                                        },
+                                      }));
                                     }}
                                     ariaLabel={`Preview ${rangeLabel}`}
                                   />
@@ -762,9 +774,21 @@ export function ChatPanel({
 
       {readRangeModalOutput ? (
         <TableModal
+          key={`${readRangeModalOutput.sheet}!${readRangeModalOutput.range}`}
           open={true}
           data={readRangeModalOutput}
-          onCloseAction={() => setReadRangeModalOutput(null)}
+          onCloseAction={() =>
+            setReadRangeUiByThreadId((current) => {
+              const existing = current[threadId];
+              return {
+                ...current,
+                [threadId]: {
+                  selectedToolCallId: existing?.selectedToolCallId ?? null,
+                  modalOutput: null,
+                },
+              };
+            })
+          }
           onInsertMentionAction={insertMentionAction}
         />
       ) : null}

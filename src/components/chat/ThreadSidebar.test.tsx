@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import { useCallback, useState } from "react";
 
 import { installDom } from "@/test-utils/dom";
@@ -239,4 +239,8 @@ describe("ThreadSidebar", () => {
     expect(await screen.findByRole("button", { name: /Untitled thread/ })).toBeTruthy();
     expect(await screen.findByRole("button", { name: /Existing/ })).toBeTruthy();
   });
+});
+
+afterAll(() => {
+  mock.restore();
 });

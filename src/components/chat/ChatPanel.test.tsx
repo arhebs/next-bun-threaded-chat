@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import { useState } from "react";
 import type { UIMessage } from "ai";
 
@@ -52,6 +52,10 @@ afterEach(() => {
   cleanup();
   sendMessageCalls.length = 0;
   addToolOutputCalls.length = 0;
+});
+
+afterAll(() => {
+  mock.restore();
 });
 
 describe("ChatPanel", () => {
