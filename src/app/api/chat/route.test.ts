@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { UIMessage } from "ai";
 
 process.env.DB_PATH = ":memory:";
@@ -307,4 +307,8 @@ describe("POST /api/chat", () => {
     expect(getThread(thread.id)).toBeNull();
     expect(loadUIMessages(thread.id)).toHaveLength(0);
   });
+});
+
+afterAll(() => {
+  mock.restore();
 });

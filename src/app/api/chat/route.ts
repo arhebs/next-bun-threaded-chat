@@ -11,9 +11,18 @@ import type { Tool, UIMessage } from "ai";
 import { NextResponse } from "next/server";
 
 import { SYSTEM_PROMPT } from "@/lib/chat/prompt";
+import {
+  confirmActionOutputSchema,
+  type ConfirmActionOutput,
+} from "@/lib/chat/tool-types";
 import { tools } from "@/lib/chat/tools";
 import { upsertMessages } from "@/lib/db/messages";
-import { getThread, setThreadTitleIfEmpty, touchThread } from "@/lib/db/threads";
+import {
+  deleteThread as deleteThreadFromDb,
+  getThread,
+  setThreadTitleIfEmpty,
+  touchThread,
+} from "@/lib/db/threads";
 import { parseMentions } from "@/lib/xlsx/mentions";
 import { parseRange } from "@/lib/xlsx/range";
 import { readRange as readRangeFromXlsx } from "@/lib/xlsx/read";
@@ -190,46 +199,59 @@ function buildMentionPrefetchSystemAppendix(
   return lines.join("\n");
 }
 
-type ConfirmDecision = {
-  approved: boolean;
-};
+function extractConfirmOutputFromMessage(
+  message: UIMessage | undefined
+): ConfirmActionOutput | null {
+  if (!message || message.role !== "assistant") {
+    return null;
+  }
 
-function extractLatestConfirmDecision(messages: UIMessage[]): ConfirmDecision | null {
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
-    const message = messages[messageIndex];
+  for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex--) {
+    const part = message.parts[partIndex] as unknown;
+    if (!part || typeof part !== "object") {
+      continue;
+    }
 
-    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex--) {
-      const part = message.parts[partIndex] as unknown;
-      if (!part || typeof part !== "object") {
-        continue;
-      }
+    const record = part as Record<string, unknown>;
+    if (record.type !== "tool-confirmAction") {
+      continue;
+    }
 
-      const record = part as Record<string, unknown>;
-      if (record.type !== "tool-confirmAction") {
-        continue;
-      }
+    const output = record.output;
+    if (output == null) {
+      continue;
+    }
 
-      if (!("output" in record)) {
-        continue;
-      }
-
-      const output = record.output;
-      if (!output || typeof output !== "object") {
-        continue;
-      }
-
-      if (!("approved" in output)) {
-        continue;
-      }
-
-      const approved = (output as { approved?: unknown }).approved;
-      if (typeof approved === "boolean") {
-        return { approved };
-      }
+    const parsed = confirmActionOutputSchema.safeParse(output);
+    if (parsed.success) {
+      return parsed.data;
     }
   }
 
   return null;
+}
+
+function messageHasToolOutput(message: UIMessage | undefined, toolType: string): boolean {
+  if (!message || message.role !== "assistant") {
+    return false;
+  }
+
+  return message.parts.some((part) => {
+    if (!part || typeof part !== "object") {
+      return false;
+    }
+
+    const record = part as Record<string, unknown>;
+    if (record.type !== toolType) {
+      return false;
+    }
+
+    if (record.state === "output-error") {
+      return true;
+    }
+
+    return record.output != null;
+  });
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -265,9 +287,15 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     if (isMockChatEnabled()) {
-      const decision = extractLatestConfirmDecision(validated);
+      const lastMessage = validated[validated.length - 1];
+      const confirmation = extractConfirmOutputFromMessage(lastMessage);
       const lastUserText = extractLastUserText(validated);
-      const shouldContinue = validated[validated.length - 1]?.role === "assistant";
+      const shouldContinue = lastMessage?.role === "assistant";
+      const hasReadRangeOutput = messageHasToolOutput(lastMessage, "tool-readRange");
+      const hasDeleteThreadOutput = messageHasToolOutput(
+        lastMessage,
+        "tool-deleteThread"
+      );
 
       const stream = createUIMessageStream({
         originalMessages: validated,
@@ -288,8 +316,44 @@ export async function POST(request: Request): Promise<Response> {
             writer.write({ type: "text-end", id: textId });
           };
 
-          if (decision) {
-            writeText(decision.approved ? "Action confirmed." : "Action canceled.");
+          if (hasDeleteThreadOutput) {
+            writeText("Thread deletion complete.");
+          } else if (hasReadRangeOutput) {
+            writeText(
+              "Range loaded. You can click the table preview to open the modal and select cells."
+            );
+          } else if (confirmation) {
+            if (!confirmation.approved) {
+              writeText("Action canceled.");
+            } else if (confirmation.action === "deleteThread") {
+              const targetThreadId = confirmation.actionPayload.threadId;
+              const toolCallId = generateId();
+
+              writer.write({
+                type: "tool-input-available",
+                toolCallId,
+                toolName: "deleteThread",
+                input: {
+                  threadId: targetThreadId,
+                  confirmationToken: confirmation.confirmationToken,
+                },
+              });
+
+              const deleted = deleteThreadFromDb(targetThreadId);
+
+              writer.write({
+                type: "tool-output-available",
+                toolCallId,
+                output: {
+                  threadId: targetThreadId,
+                  deleted,
+                },
+              });
+
+              writeText("Action confirmed.");
+            } else {
+              writeText("Action confirmed.");
+            }
           } else if (/\bdelete\b/i.test(lastUserText)) {
             writeText("I need your confirmation before deleting.");
             writer.write({
@@ -303,7 +367,73 @@ export async function POST(request: Request): Promise<Response> {
               },
             });
           } else {
-            writeText("Mock response.");
+            const mentions = lastUserText.includes("@")
+              ? parseMentions(lastUserText)
+              : [];
+
+            const unique = new Set<string>();
+            const sheet1Mentions = [] as { sheet: string; range: string }[];
+            const unsupportedMentions = [] as { sheet: string; range: string }[];
+
+            for (const mention of mentions) {
+              const key = `${mention.sheet}!${mention.range}`;
+              if (unique.has(key)) {
+                continue;
+              }
+              unique.add(key);
+
+              if (mention.sheet === "Sheet1") {
+                if (sheet1Mentions.length < MAX_PREFETCHED_MENTIONS) {
+                  sheet1Mentions.push({ sheet: mention.sheet, range: mention.range });
+                }
+              } else {
+                unsupportedMentions.push({ sheet: mention.sheet, range: mention.range });
+              }
+            }
+
+            if (sheet1Mentions.length > 0) {
+              for (const mention of sheet1Mentions) {
+                const toolCallId = generateId();
+
+                writer.write({
+                  type: "tool-input-available",
+                  toolCallId,
+                  toolName: "readRange",
+                  input: {
+                    sheet: "Sheet1",
+                    range: mention.range,
+                  },
+                });
+
+                try {
+                  const result = readRangeFromXlsx({
+                    sheet: "Sheet1",
+                    range: mention.range,
+                  });
+
+                  writer.write({
+                    type: "tool-output-available",
+                    toolCallId,
+                    output: result,
+                  });
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  writer.write({
+                    type: "tool-output-error",
+                    toolCallId,
+                    errorText: message,
+                  });
+                }
+              }
+
+              writeText("Loaded mentioned range.");
+            } else if (unsupportedMentions.length > 0) {
+              writeText(
+                "Only Sheet1 is supported. Please use mentions like @Sheet1!A1:C5."
+              );
+            } else {
+              writeText("Mock response.");
+            }
           }
 
           writer.write({ type: "finish-step" });
@@ -314,15 +444,15 @@ export async function POST(request: Request): Promise<Response> {
             return;
           }
 
-           upsertMessages(threadId, messages);
+          upsertMessages(threadId, messages);
 
-           const title = deriveThreadTitle(messages);
-           if (title) {
-             setThreadTitleIfEmpty(threadId, title);
-           }
+          const title = deriveThreadTitle(messages);
+          if (title) {
+            setThreadTitleIfEmpty(threadId, title);
+          }
 
-           touchThread(threadId);
-         },
+          touchThread(threadId);
+        },
       });
 
       return createUIMessageStreamResponse({ stream });

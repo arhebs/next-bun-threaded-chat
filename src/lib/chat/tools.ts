@@ -22,10 +22,6 @@ import {
   updateCellOutputSchema,
 } from "./tool-types";
 
-function notImplemented(toolName: string): never {
-  throw new Error(`${toolName} not implemented`);
-}
-
 export const tools = {
   confirmAction: tool({
     description:
