@@ -4,9 +4,14 @@ import * as XLSX from "xlsx";
 
 const DEFAULT_WORKBOOK_PATH = "data/example.xlsx";
 
+let workbookPathOverride: string | null = null;
+
+export function __setWorkbookPathForTesting(path: string | null): void {
+  workbookPathOverride = path;
+}
+
 function resolveWorkbookPath(): { resolvedPath: string; configuredPath: string } {
-  const envPath = process.env.XLSX_PATH?.trim();
-  const configuredPath = envPath && envPath.length > 0 ? envPath : DEFAULT_WORKBOOK_PATH;
+  const configuredPath = workbookPathOverride ?? DEFAULT_WORKBOOK_PATH;
   const resolvedPath = path.isAbsolute(configuredPath)
     ? configuredPath
     : path.resolve(process.cwd(), configuredPath);
@@ -26,8 +31,8 @@ export function loadWorkbook(): XLSX.WorkBook {
     const message = error instanceof Error ? error.message : String(error);
     const hint =
       configuredPath === DEFAULT_WORKBOOK_PATH
-        ? "Run Step 18 to generate the bundled spreadsheet."
-        : "Check XLSX_PATH and file permissions.";
+        ? "Expected a bundled workbook at data/example.xlsx. Run `bun run scripts/generate-example-xlsx.ts` to generate it."
+        : "Check that the workbook exists and is readable.";
 
     throw new Error(`Failed to read workbook at ${configuredPath}: ${message}. ${hint}`);
   }

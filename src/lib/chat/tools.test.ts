@@ -8,6 +8,7 @@ process.env.DB_PATH = ":memory:";
 
 import { getDb } from "@/lib/db/client";
 import { createThread, getThread } from "@/lib/db/threads";
+import { __setWorkbookPathForTesting } from "@/lib/xlsx/workbook";
 
 import { tools } from "@/lib/chat/tools";
 
@@ -138,8 +139,7 @@ describe("chat tools", () => {
     ];
 
     const { workbookPath, cleanup } = createTempWorkbookCopy();
-    const previousXlsxPath = process.env.XLSX_PATH;
-    process.env.XLSX_PATH = workbookPath;
+    __setWorkbookPathForTesting(workbookPath);
 
     try {
       const result = await updateExecute(
@@ -152,11 +152,7 @@ describe("chat tools", () => {
       const readBack = await readExecute({ sheet: "Sheet1", range: "B2" });
       expect(readBack.values).toEqual([[payload.value]]);
     } finally {
-      if (previousXlsxPath == null) {
-        delete process.env.XLSX_PATH;
-      } else {
-        process.env.XLSX_PATH = previousXlsxPath;
-      }
+      __setWorkbookPathForTesting(null);
       cleanup();
     }
   });
