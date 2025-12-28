@@ -10,16 +10,28 @@ type GlobalWithDeleteThreadHelper = typeof globalThis & {
 
 let deleteThreadBeforeFinish: string | null = null;
 let capturedSystem: string | null = null;
+let streamTextShouldThrow = false;
 
 mock.module("ai", () => {
   let counter = 0;
 
   return {
+    tool: (definition: any) => definition,
+    zodSchema: (schema: any) => schema,
+    createUIMessageStream: () => {
+      throw new Error("createUIMessageStream is not mocked for this test");
+    },
+    createUIMessageStreamResponse: () => {
+      throw new Error("createUIMessageStreamResponse is not mocked for this test");
+    },
     convertToModelMessages: async (messages: any) => messages,
     validateUIMessages: async ({ messages }: any) => messages,
     generateId: () => `gen-${++counter}`,
     streamText: ({ system }: any) => {
       capturedSystem = typeof system === "string" ? system : String(system);
+      if (streamTextShouldThrow) {
+        throw new Error("streamText failed");
+      }
       return {
         toUIMessageStreamResponse: async ({
           originalMessages,
@@ -82,6 +94,7 @@ describe("POST /api/chat", () => {
   beforeEach(() => {
     deleteThreadBeforeFinish = null;
     capturedSystem = null;
+    streamTextShouldThrow = false;
     resetDatabase();
   });
 
@@ -187,6 +200,41 @@ describe("POST /api/chat", () => {
     expect(capturedSystem).toBeTruthy();
     expect(capturedSystem).toContain("Prefetched spreadsheet context");
     expect(capturedSystem).toContain("Sheet1!A1:B2");
+  });
+
+  it("does not set the thread title when streaming fails", async () => {
+    const previousConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const thread = createThread();
+      streamTextShouldThrow = true;
+
+      const POST = await getChatPost();
+
+      const response = await POST(
+        new Request("http://localhost/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            id: thread.id,
+            messages: [
+              {
+                id: "u1",
+                role: "user",
+                parts: [{ type: "text", text: "This should not set a title" }],
+              },
+            ],
+          }),
+        })
+      );
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Failed to process chat" });
+      expect(getThread(thread.id)?.title).toBe("");
+      expect(loadUIMessages(thread.id)).toHaveLength(0);
+    } finally {
+      console.error = previousConsoleError;
+    }
   });
 
   it("skips persistence when the thread was deleted", async () => {

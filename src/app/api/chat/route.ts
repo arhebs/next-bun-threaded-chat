@@ -264,11 +264,6 @@ export async function POST(request: Request): Promise<Response> {
       tools: toolSet,
     });
 
-    const title = deriveThreadTitle(validated);
-    if (title) {
-      setThreadTitleIfEmpty(threadId, title);
-    }
-
     if (isMockChatEnabled()) {
       const decision = extractLatestConfirmDecision(validated);
       const lastUserText = extractLastUserText(validated);
@@ -319,9 +314,15 @@ export async function POST(request: Request): Promise<Response> {
             return;
           }
 
-          upsertMessages(threadId, messages);
-          touchThread(threadId);
-        },
+           upsertMessages(threadId, messages);
+
+           const title = deriveThreadTitle(messages);
+           if (title) {
+             setThreadTitleIfEmpty(threadId, title);
+           }
+
+           touchThread(threadId);
+         },
       });
 
       return createUIMessageStreamResponse({ stream });
@@ -373,6 +374,12 @@ export async function POST(request: Request): Promise<Response> {
          }
 
          upsertMessages(threadId, messages);
+
+         const title = deriveThreadTitle(messages);
+         if (title) {
+           setThreadTitleIfEmpty(threadId, title);
+         }
+
          touchThread(threadId);
        },
 
