@@ -36,6 +36,7 @@ test("switches between threads and shows the correct history", async ({ page }) 
   const send = page.getByRole("button", { name: "Send" });
 
   await input.fill("Alpha");
+  await expect(send).toBeEnabled();
   await send.click();
   await expect(page.getByText("Mock response.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Alpha/ })).toBeVisible();
@@ -81,6 +82,7 @@ test("opens a table modal and inserts a mention from selection", async ({
   const send = page.getByRole("button", { name: "Send" });
 
   await input.fill("Show @Sheet1!A1:B2");
+  await expect(send).toBeEnabled();
   await send.click();
 
   await expect(page.getByText("Loaded mentioned range.")).toBeVisible();
@@ -119,16 +121,22 @@ test("approving a confirmation deletes the active thread", async ({ page }) => {
   const send = page.getByRole("button", { name: "Send" });
 
   await input.fill("Alpha");
+  await expect(send).toBeEnabled();
   await send.click();
+  await expect(page.getByText("Mock response.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Alpha/ })).toBeVisible();
 
   await page.getByRole("button", { name: "New" }).click();
+  await expect(page.getByRole("heading", { name: "Untitled thread" })).toBeVisible();
 
   await input.fill("Beta");
+  await expect(send).toBeEnabled();
   await send.click();
+  await expect(page.getByText("Mock response.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await input.fill("Please delete this thread");
+  await expect(send).toBeEnabled();
   await send.click();
 
   await expect(
