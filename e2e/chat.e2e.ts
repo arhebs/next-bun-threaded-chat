@@ -41,9 +41,12 @@ test("switches between threads and shows the correct history", async ({ page }) 
   await expect(page.getByRole("button", { name: /Alpha/ })).toBeVisible();
 
   await page.getByRole("button", { name: "New" }).click();
+  await expect(page.getByRole("heading", { name: "Untitled thread" })).toBeVisible();
 
   await input.fill("Beta");
+  await expect(send).toBeEnabled();
   await send.click();
+  await expect(page.getByText("Mock response.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await expect(page.getByRole("heading", { name: "Beta" })).toBeVisible();
