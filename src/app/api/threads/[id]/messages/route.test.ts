@@ -29,6 +29,18 @@ describe("GET /api/threads/:id/messages", () => {
     expect(body).toEqual({ error: "Missing thread id" });
   });
 
+  it("returns an empty list when there are no messages", async () => {
+    const thread = createThread();
+
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ id: thread.id }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ messages: [] });
+  });
+
   it("returns persisted UI messages", async () => {
     const thread = createThread();
 

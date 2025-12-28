@@ -117,6 +117,10 @@ export async function GET(
     }
 
     const messages = loadUIMessages(threadId);
+    if (messages.length === 0) {
+      return NextResponse.json({ messages: [] }, { status: 200 });
+    }
+
     const toolSet = tools as unknown as Record<string, Tool<unknown, unknown>>;
 
     const validated = await validateUIMessages({
