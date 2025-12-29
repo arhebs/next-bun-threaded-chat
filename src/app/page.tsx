@@ -21,6 +21,63 @@ function deriveThreadTitleFromText(text: string): string | null {
   return `${normalized.slice(0, maxLength).trimEnd()}...`;
 }
 
+function deriveThreadTitleFromMessages(messages: UIMessage[]): string | null {
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+
+    for (const part of message.parts) {
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+
+      const record = part as { type?: unknown; text?: unknown };
+      if (record.type !== "text" || typeof record.text !== "string") {
+        continue;
+      }
+
+      const derived = deriveThreadTitleFromText(record.text);
+      if (derived) {
+        return derived;
+      }
+    }
+  }
+
+  return null;
+}
+
+function mergeThreadsPreservingLocalState(current: Thread[], incoming: Thread[]): Thread[] {
+  const byId = new Map<string, Thread>();
+  for (const thread of current) {
+    byId.set(thread.id, thread);
+  }
+
+  const merged = incoming.map((thread) => {
+    const existing = byId.get(thread.id);
+    if (!existing) {
+      return thread;
+    }
+
+    return {
+      ...thread,
+      title: thread.title || existing.title,
+      createdAt: Math.min(thread.createdAt, existing.createdAt),
+      updatedAt: Math.max(thread.updatedAt, existing.updatedAt),
+    };
+  });
+
+  merged.sort((left, right) => {
+    const diff = right.updatedAt - left.updatedAt;
+    if (diff !== 0) {
+      return diff;
+    }
+    return left.id.localeCompare(right.id);
+  });
+
+  return merged;
+}
+
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
@@ -36,7 +93,7 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleThreadsChange = useCallback((nextThreads: Thread[]) => {
-    setThreads(nextThreads);
+    setThreads((current) => mergeThreadsPreservingLocalState(current, nextThreads));
 
     setMessagesByThreadId((current) => {
       if (Object.keys(current).length === 0) {
@@ -111,6 +168,20 @@ export default function Home() {
       setInitialMessages(cached ?? []);
       setMessageError(null);
 
+      if (cached && cached.length > 0) {
+        const derivedTitle = deriveThreadTitleFromMessages(cached);
+        if (derivedTitle) {
+          setThreads((current) =>
+            current.map((thread) => {
+              if (thread.id !== threadId || thread.title) {
+                return thread;
+              }
+              return { ...thread, title: derivedTitle };
+            })
+          );
+        }
+      }
+
       if (options?.skipMessageLoad) {
         setIsLoadingMessages(false);
         return;
@@ -139,10 +210,13 @@ export default function Home() {
   }, [handleThreadsChange]);
 
   const touchThread = useCallback(
-    (threadId: string, options?: { titleCandidate?: string }) => {
+    (threadId: string, options?: { titleCandidate?: string; isFirstMessage?: boolean }) => {
       const now = Date.now();
       const titleCandidate = options?.titleCandidate;
-      const derivedTitle = titleCandidate ? deriveThreadTitleFromText(titleCandidate) : null;
+      const derivedTitle =
+        titleCandidate && options?.isFirstMessage
+          ? deriveThreadTitleFromText(titleCandidate)
+          : null;
 
       setThreads((current) => {
         const next = current.map((thread) => {
@@ -204,6 +278,18 @@ export default function Home() {
             ...current,
             [selectedThreadId]: messages,
           }));
+
+          const derivedTitle = deriveThreadTitleFromMessages(messages);
+          if (derivedTitle) {
+            setThreads((current) =>
+              current.map((thread) => {
+                if (thread.id !== selectedThreadId || thread.title) {
+                  return thread;
+                }
+                return { ...thread, title: derivedTitle };
+              })
+            );
+          }
         }
       })
       .catch((err) => {

@@ -27,7 +27,10 @@ type ChatPanelProps = {
   isLoading: boolean;
   error: string | null;
   onThreadsRefreshAction?: () => void;
-  onThreadTouchAction?: (threadId: string, options?: { titleCandidate?: string }) => void;
+  onThreadTouchAction?: (
+    threadId: string,
+    options?: { titleCandidate?: string; isFirstMessage?: boolean }
+  ) => void;
   onOpenThreadsAction?: () => void;
 };
 
@@ -754,7 +757,10 @@ export function ChatPanel({
     isAtBottomRef.current = true;
     setInput("");
     clearError();
-    onThreadTouchAction?.(threadId, { titleCandidate: nextInput });
+    onThreadTouchAction?.(threadId, {
+      titleCandidate: nextInput,
+      isFirstMessage: renderedMessages.length === 0,
+    });
     await sendMessage({ text: nextInput });
   };
 
