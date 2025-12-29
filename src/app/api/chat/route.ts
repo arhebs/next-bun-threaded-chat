@@ -24,7 +24,6 @@ import {
   touchThread,
 } from "@/lib/db/threads";
 import { parseMentions } from "@/lib/xlsx/mentions";
-import { parseRange } from "@/lib/xlsx/range";
 import { readRange as readRangeFromXlsx } from "@/lib/xlsx/read";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +32,6 @@ export const runtime = "nodejs";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
 const MAX_PREFETCHED_MENTIONS = 3;
-const MAX_PREFETCHED_CELLS = 200;
 
 type ChatRequestBody = {
   id?: string;
@@ -112,91 +110,6 @@ function extractLastUserText(messages: UIMessage[]): string {
   }
 
   return "";
-}
-
-type PrefetchedRangeContext = {
-  sheet: "Sheet1";
-  range: string;
-  values: (string | number | boolean | null)[][];
-};
-
-function buildMentionPrefetchSystemAppendix(
-  messages: UIMessage[]
-): string | null {
-  const lastUserText = extractLastUserText(messages);
-  if (!lastUserText || !lastUserText.includes("@")) {
-    return null;
-  }
-
-  const mentions = parseMentions(lastUserText);
-  if (mentions.length === 0) {
-    return null;
-  }
-
-  const sheet1Ranges: string[] = [];
-  const seen = new Set<string>();
-  const ignoredSheets = new Set<string>();
-
-  for (const mention of mentions) {
-    const key = `${mention.sheet}!${mention.range}`;
-
-    if (mention.sheet !== "Sheet1") {
-      ignoredSheets.add(key);
-      continue;
-    }
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    sheet1Ranges.push(mention.range);
-  }
-
-  const prefetched: PrefetchedRangeContext[] = [];
-  const skipped: string[] = [];
-
-  for (const range of sheet1Ranges) {
-    if (prefetched.length >= MAX_PREFETCHED_MENTIONS) {
-      break;
-    }
-
-    try {
-      const parsed = parseRange(range, { maxCells: MAX_PREFETCHED_CELLS });
-      const result = readRangeFromXlsx({ sheet: "Sheet1", range: parsed.normalized });
-      prefetched.push(result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      skipped.push(`Sheet1!${range}: ${message}`);
-    }
-  }
-
-  if (prefetched.length === 0 && skipped.length === 0 && ignoredSheets.size === 0) {
-    return null;
-  }
-
-  const lines: string[] = [];
-  lines.push("Prefetched spreadsheet context (authoritative; may be incomplete):");
-
-  for (const entry of prefetched) {
-    lines.push(`- ${entry.sheet}!${entry.range}: ${JSON.stringify(entry.values)}`);
-  }
-
-  if (skipped.length > 0) {
-    lines.push("Prefetch skipped:");
-    for (const item of skipped) {
-      lines.push(`- ${item}`);
-    }
-  }
-
-  if (ignoredSheets.size > 0) {
-    lines.push("Mentions on unsupported sheets (ignored):");
-    for (const item of ignoredSheets) {
-      lines.push(`- ${item}`);
-    }
-  }
-
-  return lines.join("\n");
 }
 
 function extractConfirmOutputFromMessage(
@@ -480,16 +393,24 @@ export async function POST(request: Request): Promise<Response> {
       ? openai.chat(modelId as never)
       : openai(modelId as never);
 
-    const mentionAppendix = buildMentionPrefetchSystemAppendix(validated);
-    const system = mentionAppendix
-      ? `${SYSTEM_PROMPT}\n\n${mentionAppendix}`
-      : SYSTEM_PROMPT;
+    const mentionAppendix = null;
+    const threadAppendix = [
+      "Thread context:",
+      `- Current thread id: ${threadId}`,
+      "- When deleting this thread, always use the current thread id.",
+      "- Never guess thread ids.",
+    ].join("\n");
+
+    const system = [SYSTEM_PROMPT, threadAppendix, mentionAppendix]
+      .filter(Boolean)
+      .join("\n\n");
 
     const result = streamText({
       model,
       system,
       messages: modelMessages,
       tools: toolSet,
+      toolChoice: "auto",
       experimental_context: {
         uiMessages: validated,
       },
@@ -498,21 +419,20 @@ export async function POST(request: Request): Promise<Response> {
     return result.toUIMessageStreamResponse({
       originalMessages: validated,
       generateMessageId: generateId,
-       onFinish: async ({ messages }) => {
-         if (!getThread(threadId)) {
-           return;
-         }
+      onFinish: async ({ messages }) => {
+        if (!getThread(threadId)) {
+          return;
+        }
 
-         upsertMessages(threadId, messages);
+        upsertMessages(threadId, messages);
 
-         const title = deriveThreadTitle(messages);
-         if (title) {
-           setThreadTitleIfEmpty(threadId, title);
-         }
+        const title = deriveThreadTitle(messages);
+        if (title) {
+          setThreadTitleIfEmpty(threadId, title);
+        }
 
-         touchThread(threadId);
-       },
-
+        touchThread(threadId);
+      },
     });
   } catch (error) {
     console.error("POST /api/chat failed", error);

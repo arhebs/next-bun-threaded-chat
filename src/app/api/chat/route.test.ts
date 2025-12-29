@@ -19,10 +19,14 @@ mock.module("ai", () => {
     tool: (definition: any) => definition,
     zodSchema: (schema: any) => schema,
     createUIMessageStream: () => {
-      throw new Error("createUIMessageStream is not mocked for this test");
+      return new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
     },
     createUIMessageStreamResponse: () => {
-      throw new Error("createUIMessageStreamResponse is not mocked for this test");
+      return new Response("ok", { status: 200 });
     },
     convertToModelMessages: async (messages: any) => messages,
     validateUIMessages: async ({ messages, tools }: any) => {
@@ -220,7 +224,7 @@ describe("POST /api/chat", () => {
     }
   });
 
-  it("prefetches mentioned ranges into the system prompt", async () => {
+  it("does not prefetch mentioned ranges into the system prompt", async () => {
     const thread = createThread();
     const POST = await getChatPost();
 
@@ -242,8 +246,7 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(capturedSystem).toBeTruthy();
-    expect(capturedSystem).toContain("Prefetched spreadsheet context");
-    expect(capturedSystem).toContain("Sheet1!A1:B2");
+    expect(capturedSystem).not.toContain("Prefetched spreadsheet context");
   });
 
   it("does not set the thread title when streaming fails", async () => {
