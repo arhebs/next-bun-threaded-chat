@@ -222,5 +222,5 @@ export function selectionToA1Range(baseRange: string, selection: GridSelection):
 }
 
 export function normalizeA1Range(range: string): string {
-  return parseRange(range).normalized;
+  return parseRange(range, { maxCells: Number.MAX_SAFE_INTEGER }).normalized;
 }
