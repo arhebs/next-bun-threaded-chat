@@ -13,6 +13,16 @@ A demo / assignment app: ChatGPT-style UI with threaded conversations, SQLite pe
   - Mock “send invites” tool.
 - Dangerous actions (cell edits, thread deletion) require confirmation tokens.
 
+## Generative UI
+
+### Range preview
+
+![Spreadsheet range preview](public/screenshots/range-preview.png)
+
+### Confirmation card
+
+![Confirmation card](public/screenshots/confirmation-card.png)
+
 ## Requirements
 
 - Bun `>= 1.3`.
