@@ -475,26 +475,62 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const isAtBottomRef = useRef(true);
+  const isUserScrollingRef = useRef(false);
+  const isAutoScrollingRef = useRef(false);
+  const scrollIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const updateIsAtBottom = useCallback(() => {
+  const computeIsNearBottom = useCallback(() => {
     const container = messageListRef.current;
     if (!container) {
-      return;
+      return true;
     }
 
     const threshold = 96;
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-    isAtBottomRef.current = distanceFromBottom < threshold;
+    return distanceFromBottom < threshold;
   }, []);
+
+  const updateIsAtBottom = useCallback(() => {
+    isAtBottomRef.current = computeIsNearBottom();
+  }, [computeIsNearBottom]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     if (!messageListRef.current) {
       return;
     }
 
+    isAutoScrollingRef.current = true;
+    if (autoScrollTimeoutRef.current) {
+      clearTimeout(autoScrollTimeoutRef.current);
+    }
+
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+
+    const resetDelay = behavior === "smooth" ? 300 : 120;
+    autoScrollTimeoutRef.current = setTimeout(() => {
+      isAutoScrollingRef.current = false;
+    }, resetDelay);
   }, []);
+
+  const handleMessageScroll = useCallback(() => {
+    updateIsAtBottom();
+
+    if (isAutoScrollingRef.current) {
+      return;
+    }
+
+    isUserScrollingRef.current = true;
+
+    if (scrollIdleTimeoutRef.current) {
+      clearTimeout(scrollIdleTimeoutRef.current);
+    }
+
+    scrollIdleTimeoutRef.current = setTimeout(() => {
+      isUserScrollingRef.current = false;
+    }, 160);
+  }, [updateIsAtBottom]);
 
   useEffect(() => {
     updateIsAtBottom();
@@ -524,7 +560,17 @@ export function ChatPanel({
   useEffect(() => {
     confirmationTokensRef.current.clear();
     isAtBottomRef.current = true;
+    isUserScrollingRef.current = false;
+    isAutoScrollingRef.current = false;
     previousChatStatusRef.current = "ready";
+
+    if (scrollIdleTimeoutRef.current) {
+      clearTimeout(scrollIdleTimeoutRef.current);
+    }
+
+    if (autoScrollTimeoutRef.current) {
+      clearTimeout(autoScrollTimeoutRef.current);
+    }
 
     const raf = requestAnimationFrame(() => {
       scrollToBottom("auto");
@@ -602,7 +648,7 @@ export function ChatPanel({
         : chatStatusLabel;
 
   useEffect(() => {
-    if (!isAtBottomRef.current) {
+    if (!isAtBottomRef.current || isUserScrollingRef.current) {
       return;
     }
 
@@ -615,6 +661,36 @@ export function ChatPanel({
       cancelAnimationFrame(raf);
     };
   }, [isChatBusy, renderedMessages, scrollToBottom]);
+
+  useEffect(() => {
+    if (chatStatus !== "streaming" || isUserScrollingRef.current) {
+      return;
+    }
+
+    isAtBottomRef.current = true;
+    scrollToBottom("auto");
+  }, [chatStatus, scrollToBottom]);
+
+  useEffect(() => {
+    const container = messageListRef.current;
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!isAtBottomRef.current || isUserScrollingRef.current) {
+        return;
+      }
+
+      scrollToBottom("auto");
+    });
+
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [scrollToBottom]);
 
   const visibleMessageCount = useMemo(() => {
     if (!thread) {
@@ -724,7 +800,7 @@ export function ChatPanel({
                 ref={messageListRef}
                 role="log"
                 aria-label="Chat messages"
-                onScroll={updateIsAtBottom}
+                onScroll={handleMessageScroll}
                 className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 transition-opacity duration-[250ms] ease-in-out motion-safe:will-change-[opacity] ${
                   isCrossfading ? "opacity-95" : "opacity-100"
                 }`}
