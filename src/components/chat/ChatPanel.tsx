@@ -38,7 +38,6 @@ type ChatPart = UIMessage["parts"][number];
 
 type TextLikePart = Extract<ChatPart, { type: "text" | "reasoning" }>;
 
-type ToolPart = Extract<ChatPart, { type: `tool-${string}` } | { type: "dynamic-tool" }>;
 
 type ConfirmActionPart = ChatPart & {
   type: "tool-confirmAction";
@@ -225,24 +224,16 @@ function isTextLikePart(part: ChatPart): part is TextLikePart {
   return part.type === "text" || part.type === "reasoning";
 }
 
-function isToolLikePart(part: ChatPart): part is ToolPart {
-  return part.type === "dynamic-tool" || part.type.startsWith("tool-");
-}
+function getToolNameFromPart(part: ChatPart): string | null {
+  if (part.type === "dynamic-tool") {
+    return part.toolName;
+  }
 
-function isConfirmActionPart(part: ChatPart): part is ConfirmActionPart {
-  return part.type === "tool-confirmAction";
-}
+  if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+    return part.type.slice("tool-".length);
+  }
 
-function isReadRangePart(part: ChatPart): part is ReadRangePart {
-  return part.type === "tool-readRange";
-}
-
-function isUpdateCellPart(part: ChatPart): part is UpdateCellPart {
-  return part.type === "tool-updateCell";
-}
-
-function isDeleteThreadPart(part: ChatPart): part is DeleteThreadPart {
-  return part.type === "tool-deleteThread";
+  return null;
 }
 
 function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
@@ -622,6 +613,330 @@ export function ChatPanel({
     [addToolOutput, getConfirmationToken]
   );
 
+  const renderConfirmActionPart = useCallback(
+    (part: ConfirmActionPart, key: string) => {
+      const input = part.input as ConfirmActionInput | undefined;
+      const output = ("output" in part ? part.output : undefined) as
+        | ConfirmActionOutput
+        | undefined;
+
+      const action = input?.action ?? output?.action;
+      const payload = input?.actionPayload ?? output?.actionPayload;
+      const status = resolveConfirmStatus(part);
+      const title = action ? formatConfirmAction(action) : "Confirm action";
+      const description =
+        status === "error"
+          ? part.errorText ?? "Failed to prepare confirmation."
+          : input?.prompt ??
+              (status === "pending"
+                ? "Review and confirm to proceed."
+                : "Confirmation recorded.");
+
+      const isActionable =
+        status === "pending" && part.state === "input-available" && input;
+
+      return (
+        <div key={key}>
+          <ConfirmationCard
+            title={title}
+            description={description}
+            payload={payload}
+            status={status}
+            onApprove={isActionable ? () => handleConfirmAction(part, true) : undefined}
+            onReject={isActionable ? () => handleConfirmAction(part, false) : undefined}
+            disabled={!isActionable}
+          />
+        </div>
+      );
+    },
+    [handleConfirmAction]
+  );
+
+  const renderReadRangePart = useCallback(
+    (part: ReadRangePart, key: string) => {
+      const output = ("output" in part ? part.output : undefined) as unknown;
+
+      if (part.state === "output-error") {
+        const errorText = part.errorText ?? "Failed to read spreadsheet range.";
+        return (
+          <div
+            key={key}
+            className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+          >
+            <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+              Range read failed
+            </div>
+            <div className="mt-2">{errorText}</div>
+            {output != null ? (
+              <div className="mt-3">
+                <ToolJsonView payload={output} />
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+
+      if (output != null) {
+        const parsed = isReadRangeOutput(output) ? (output as ReadRangeOutput) : null;
+        const rangeLabel = parsed ? `${parsed.sheet}!${parsed.range}` : "Sheet1 (unknown range)";
+
+        return (
+          <div key={key} className="space-y-3">
+            {parsed ? (
+              <>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+                  Range <span className="font-mono text-foreground">{rangeLabel}</span>
+                </div>
+                <TablePreview
+                  values={parsed.values}
+                  selected={selectedReadRangeToolCallId === part.toolCallId}
+                  onClick={() => {
+                    setReadRangeUiByThreadId((current) => ({
+                      ...current,
+                      [threadId]: {
+                        selectedToolCallId: part.toolCallId,
+                        modalOutput: parsed,
+                      },
+                    }));
+                  }}
+                  ariaLabel={`Preview ${rangeLabel}`}
+                />
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+                Tool returned an unexpected payload.
+              </div>
+            )}
+            <ToolJsonView payload={output} />
+          </div>
+        );
+      }
+
+      const toolState = part.state ?? "unknown";
+      const inputRecord =
+        part.input && typeof part.input === "object"
+          ? (part.input as Record<string, unknown>)
+          : null;
+      const rangeLabel =
+        typeof inputRecord?.sheet === "string" && typeof inputRecord?.range === "string"
+          ? `${inputRecord.sheet}!${inputRecord.range}`
+          : null;
+      const heading = toolState.startsWith("input")
+        ? "Reading spreadsheet..."
+        : "Tool: readRange";
+
+      return (
+        <div
+          key={key}
+          className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+        >
+          <div className="font-semibold uppercase tracking-[0.2em]">{heading}</div>
+          {rangeLabel ? (
+            <div className="mt-2 font-mono text-foreground">{rangeLabel}</div>
+          ) : null}
+          <div className="mt-2">Status: {toolState}</div>
+        </div>
+      );
+    },
+    [selectedReadRangeToolCallId, setReadRangeUiByThreadId, threadId]
+  );
+
+  const renderUpdateCellPart = useCallback((part: UpdateCellPart, key: string) => {
+    const inputRecord =
+      part.input && typeof part.input === "object" ? (part.input as Record<string, unknown>) : null;
+    const sheetLabel = typeof inputRecord?.sheet === "string" ? inputRecord.sheet : "Sheet1";
+    const cellLabel = typeof inputRecord?.cell === "string" ? inputRecord.cell : null;
+    const output = ("output" in part ? part.output : undefined) as unknown;
+
+    if (part.state === "output-error") {
+      const errorText = part.errorText ?? "Failed to update spreadsheet.";
+      return (
+        <div
+          key={key}
+          className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+        >
+          <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+            Spreadsheet update failed
+          </div>
+          <div className="mt-2">{errorText}</div>
+          {output != null ? (
+            <div className="mt-3">
+              <ToolJsonView payload={output} />
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (output != null) {
+      const parsed = isUpdateCellOutput(output) ? (output as UpdateCellOutput) : null;
+      const target = parsed
+        ? `${parsed.sheet}!${parsed.cell}`
+        : cellLabel
+          ? `${sheetLabel}!${cellLabel}`
+          : "Sheet1 (unknown cell)";
+
+      return (
+        <div key={key} className="space-y-3">
+          <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+            <div className="font-semibold uppercase tracking-[0.2em]">Spreadsheet update</div>
+            <div className="mt-2">
+              Target: <span className="font-mono text-foreground">{target}</span>
+            </div>
+            {parsed ? (
+              <div className="mt-1">
+                Value: <span className="font-mono text-foreground">{formatCellValue(parsed.value)}</span>
+              </div>
+            ) : null}
+          </div>
+          <ToolJsonView payload={output} />
+        </div>
+      );
+    }
+
+    const toolState = part.state ?? "unknown";
+    const target = cellLabel ? `${sheetLabel}!${cellLabel}` : null;
+
+    return (
+      <div
+        key={key}
+        className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+      >
+        <div className="font-semibold uppercase tracking-[0.2em]">Updating spreadsheet...</div>
+        {target ? <div className="mt-2 font-mono text-foreground">{target}</div> : null}
+        <div className="mt-2">Status: {toolState}</div>
+      </div>
+    );
+  }, []);
+
+  const renderDeleteThreadPart = useCallback(
+    (part: DeleteThreadPart, key: string) => {
+      const output = ("output" in part ? part.output : undefined) as unknown;
+
+      if (part.state === "output-error") {
+        const errorText = part.errorText ?? "Failed to delete thread.";
+        return (
+          <div
+            key={key}
+            className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+          >
+            <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
+              Thread delete failed
+            </div>
+            <div className="mt-2">{errorText}</div>
+            {output != null ? (
+              <div className="mt-3">
+                <ToolJsonView payload={output} />
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+
+      if (output != null) {
+        const parsed = isDeleteThreadOutput(output) ? (output as DeleteThreadOutput) : null;
+        const deleted = parsed?.deleted ?? false;
+
+        return (
+          <div key={key} className="space-y-3">
+            <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
+              <div className="font-semibold uppercase tracking-[0.2em]">Thread deletion</div>
+              {parsed ? (
+                <div className="mt-2 space-y-1">
+                  <div>
+                    Thread: <span className="font-mono text-foreground">{parsed.threadId}</span>
+                  </div>
+                  <div>
+                    Result:{" "}
+                    <span
+                      className={
+                        deleted
+                          ? "font-semibold text-foreground"
+                          : "font-semibold text-muted"
+                      }
+                    >
+                      {deleted ? "Deleted" : "Not found"}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2">Tool returned an unexpected payload.</div>
+              )}
+
+              {deleted && onThreadsRefreshAction ? (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={onThreadsRefreshAction}
+                    className="rounded-full border border-border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted transition hover:border-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    Refresh threads
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <ToolJsonView payload={output} />
+          </div>
+        );
+      }
+
+      const toolState = part.state ?? "unknown";
+
+      return (
+        <div
+          key={key}
+          className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+        >
+          <div className="font-semibold uppercase tracking-[0.2em]">Tool: deleteThread</div>
+          <div className="mt-2">Status: {toolState}</div>
+        </div>
+      );
+    },
+    [onThreadsRefreshAction]
+  );
+
+  const renderToolPart = useCallback(
+    (part: ChatPart, key: string) => {
+      const toolName = getToolNameFromPart(part);
+      if (!toolName) {
+        return null;
+      }
+
+      switch (toolName) {
+        case "confirmAction":
+          return renderConfirmActionPart(part as ConfirmActionPart, key);
+        case "readRange":
+          return renderReadRangePart(part as ReadRangePart, key);
+        case "updateCell":
+          return renderUpdateCellPart(part as UpdateCellPart, key);
+        case "deleteThread":
+          return renderDeleteThreadPart(part as DeleteThreadPart, key);
+        default: {
+          const toolState =
+            typeof (part as { state?: unknown }).state === "string"
+              ? ((part as { state?: string }).state ?? "unknown")
+              : "unknown";
+
+          return (
+            <div
+              key={key}
+              className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+            >
+              <div className="font-semibold uppercase tracking-[0.2em]">Tool: {toolName}</div>
+              <div className="mt-2">Status: {toolState}</div>
+            </div>
+          );
+        }
+      }
+    },
+    [
+      renderConfirmActionPart,
+      renderDeleteThreadPart,
+      renderReadRangePart,
+      renderUpdateCellPart,
+    ]
+  );
+
   const title = thread?.title?.trim()
     ? thread.title
     : thread
@@ -836,363 +1151,23 @@ export function ChatPanel({
                             </div>
                           );
                         }
-                        if (isConfirmActionPart(part)) {
-
-                        const input = part.input as ConfirmActionInput | undefined;
-                        const output =
-                          "output" in part
-                            ? (part.output as ConfirmActionOutput | undefined)
-                            : undefined;
-                        const action = input?.action ?? output?.action;
-                        const payload = input?.actionPayload ?? output?.actionPayload;
-                        const status = resolveConfirmStatus(part);
-                        const title = action ? formatConfirmAction(action) : "Confirm action";
-                        const description =
-                          status === "error"
-                            ? part.errorText ?? "Failed to prepare confirmation."
-                            : input?.prompt ??
-                                (status === "pending"
-                                  ? "Review and confirm to proceed."
-                                  : "Confirmation recorded.");
-                        const isActionable =
-                          status === "pending" && part.state === "input-available" && input;
-
-                        return (
-                          <div key={`${message.id}-part-${index}`}>
-                            <ConfirmationCard
-                              title={title}
-                              description={description}
-                              payload={payload}
-                              status={status}
-                              onApprove={
-                                isActionable
-                                  ? () => handleConfirmAction(part, true)
-                                  : undefined
-                              }
-                              onReject={
-                                isActionable
-                                  ? () => handleConfirmAction(part, false)
-                                  : undefined
-                              }
-                              disabled={!isActionable}
-                            />
-                          </div>
-                        );
-                      }
-                      if (isReadRangePart(part)) {
-                        const output =
-                          "output" in part ? (part.output as unknown) : undefined;
-
-                        if (part.state === "output-error") {
-                          const errorText =
-                            part.errorText ?? "Failed to read spreadsheet range.";
-                          return (
-                            <div
-                              key={`${message.id}-part-${index}`}
-                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                            >
-                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
-                                Range read failed
-                              </div>
-                              <div className="mt-2">{errorText}</div>
-                              {output != null ? (
-                                <div className="mt-3">
-                                  <ToolJsonView payload={output} />
-                                </div>
-                              ) : null}
-                            </div>
-                          );
+                        const partKey = `${message.id}-part-${index}`;
+                        const toolRendered = renderToolPart(part, partKey);
+                        if (toolRendered) {
+                          return toolRendered;
                         }
+                         if (part.type === "step-start") {
+                           return null;
+                         }
 
-                        if (output != null) {
-                          const parsed = isReadRangeOutput(output)
-                            ? (output as ReadRangeOutput)
-                            : null;
-                          const rangeLabel = parsed
-                            ? `${parsed.sheet}!${parsed.range}`
-                            : "Sheet1 (unknown range)";
-
-                          return (
-                            <div key={`${message.id}-part-${index}`} className="space-y-3">
-                              {parsed ? (
-                                <>
-                                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-                                    Range{" "}
-                                    <span className="font-mono text-foreground">
-                                      {rangeLabel}
-                                    </span>
-                                  </div>
-                                  <TablePreview
-                                    values={parsed.values}
-                                    selected={
-                                      selectedReadRangeToolCallId === part.toolCallId
-                                    }
-                                    onClick={() => {
-                                      setReadRangeUiByThreadId((current) => ({
-                                        ...current,
-                                        [threadId]: {
-                                          selectedToolCallId: part.toolCallId,
-                                          modalOutput: parsed,
-                                        },
-                                      }));
-                                    }}
-                                    ariaLabel={`Preview ${rangeLabel}`}
-                                  />
-                                </>
-                              ) : (
-                                <div className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
-                                  Tool returned an unexpected payload.
-                                </div>
-                              )}
-                              <ToolJsonView payload={output} />
-                            </div>
-                          );
-                        }
-
-                        const toolState = part.state ?? "unknown";
-                        const inputRecord =
-                          part.input && typeof part.input === "object"
-                            ? (part.input as Record<string, unknown>)
-                            : null;
-                        const rangeLabel =
-                          typeof inputRecord?.sheet === "string" &&
-                          typeof inputRecord?.range === "string"
-                            ? `${inputRecord.sheet}!${inputRecord.range}`
-                            : null;
-                        const heading = toolState.startsWith("input")
-                          ? "Reading spreadsheet..."
-                          : "Tool: readRange";
-
-                        return (
-                          <div
-                            key={`${message.id}-part-${index}`}
-                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                          >
-                            <div className="font-semibold uppercase tracking-[0.2em]">
-                              {heading}
-                            </div>
-                            {rangeLabel ? (
-                              <div className="mt-2 font-mono text-foreground">
-                                {rangeLabel}
-                              </div>
-                            ) : null}
-                            <div className="mt-2">Status: {toolState}</div>
-                          </div>
-                        );
-                      }
-                      if (isUpdateCellPart(part)) {
-                        const inputRecord =
-                          part.input && typeof part.input === "object"
-                            ? (part.input as Record<string, unknown>)
-                            : null;
-                        const sheetLabel =
-                          typeof inputRecord?.sheet === "string" ? inputRecord.sheet : "Sheet1";
-                        const cellLabel =
-                          typeof inputRecord?.cell === "string" ? inputRecord.cell : null;
-                        const output =
-                          "output" in part ? (part.output as unknown) : undefined;
-
-                        if (part.state === "output-error") {
-                          const errorText =
-                            part.errorText ?? "Failed to update spreadsheet.";
-                          return (
-                            <div
-                              key={`${message.id}-part-${index}`}
-                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                            >
-                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
-                                Spreadsheet update failed
-                              </div>
-                              <div className="mt-2">{errorText}</div>
-                              {output != null ? (
-                                <div className="mt-3">
-                                  <ToolJsonView payload={output} />
-                                </div>
-                              ) : null}
-                            </div>
-                          );
-                        }
-
-                        if (output != null) {
-                          const parsed = isUpdateCellOutput(output)
-                            ? (output as UpdateCellOutput)
-                            : null;
-                          const target = parsed
-                            ? `${parsed.sheet}!${parsed.cell}`
-                            : cellLabel
-                              ? `${sheetLabel}!${cellLabel}`
-                              : "Sheet1 (unknown cell)";
-
-                          return (
-                            <div key={`${message.id}-part-${index}`} className="space-y-3">
-                              <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
-                                <div className="font-semibold uppercase tracking-[0.2em]">
-                                  Spreadsheet update
-                                </div>
-                                <div className="mt-2">
-                                  Target:{" "}
-                                  <span className="font-mono text-foreground">
-                                    {target}
-                                  </span>
-                                </div>
-                                {parsed ? (
-                                  <div className="mt-1">
-                                    Value:{" "}
-                                    <span className="font-mono text-foreground">
-                                      {formatCellValue(parsed.value)}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                              <ToolJsonView payload={output} />
-                            </div>
-                          );
-                        }
-
-                        const toolState = part.state ?? "unknown";
-                        const target = cellLabel ? `${sheetLabel}!${cellLabel}` : null;
-
-                        return (
-                          <div
-                            key={`${message.id}-part-${index}`}
-                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                          >
-                            <div className="font-semibold uppercase tracking-[0.2em]">
-                              Updating spreadsheet...
-                            </div>
-                            {target ? (
-                              <div className="mt-2 font-mono text-foreground">
-                                {target}
-                              </div>
-                            ) : null}
-                            <div className="mt-2">Status: {toolState}</div>
-                          </div>
-                        );
-                      }
-                      if (isDeleteThreadPart(part)) {
-                        const output =
-                          "output" in part ? (part.output as unknown) : undefined;
-
-                        if (part.state === "output-error") {
-                          const errorText =
-                            part.errorText ?? "Failed to delete thread.";
-                          return (
-                            <div
-                              key={`${message.id}-part-${index}`}
-                              className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                            >
-                              <div className="font-semibold uppercase tracking-[0.2em] text-red-700 dark:text-red-200">
-                                Thread delete failed
-                              </div>
-                              <div className="mt-2">{errorText}</div>
-                              {output != null ? (
-                                <div className="mt-3">
-                                  <ToolJsonView payload={output} />
-                                </div>
-                              ) : null}
-                            </div>
-                          );
-                        }
-
-                        if (output != null) {
-                          const parsed = isDeleteThreadOutput(output)
-                            ? (output as DeleteThreadOutput)
-                            : null;
-                          const deleted = parsed?.deleted ?? false;
-
-                          return (
-                            <div key={`${message.id}-part-${index}`} className="space-y-3">
-                              <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
-                                <div className="font-semibold uppercase tracking-[0.2em]">
-                                  Thread deletion
-                                </div>
-                                {parsed ? (
-                                  <div className="mt-2 space-y-1">
-                                    <div>
-                                      Thread:{" "}
-                                      <span className="font-mono text-foreground">
-                                        {parsed.threadId}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      Result:{" "}
-                                      <span
-                                        className={
-                                          deleted
-                                            ? "font-semibold text-foreground"
-                                            : "font-semibold text-muted"
-                                        }
-                                      >
-                                        {deleted ? "Deleted" : "Not found"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mt-2">
-                                    Tool returned an unexpected payload.
-                                  </div>
-                                )}
-
-                                {deleted && onThreadsRefreshAction ? (
-                                  <div className="mt-3">
-                                    <button
-                                      type="button"
-                                      onClick={onThreadsRefreshAction}
-                                      className="rounded-full border border-border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted transition hover:border-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                                    >
-                                      Refresh threads
-                                    </button>
-                                  </div>
-                                ) : null}
-                              </div>
-                              <ToolJsonView payload={output} />
-                            </div>
-                          );
-                        }
-
-                        const toolState = part.state ?? "unknown";
-
-                        return (
-                          <div
-                            key={`${message.id}-part-${index}`}
-                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                          >
-                            <div className="font-semibold uppercase tracking-[0.2em]">
-                              Tool: deleteThread
-                            </div>
-                            <div className="mt-2">Status: {toolState}</div>
-                          </div>
-                        );
-                      }
-                      if (isToolLikePart(part)) {
-                        const toolName =
-                          part.type === "dynamic-tool"
-                            ? part.toolName
-                            : part.type.replace("tool-", "");
-                        const toolState = "state" in part ? part.state : "unknown";
-                        return (
-                          <div
-                            key={`${message.id}-part-${index}`}
-                            className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                          >
-                            <div className="font-semibold uppercase tracking-[0.2em]">
-                              Tool: {toolName}
-                            </div>
-                            <div className="mt-2">Status: {toolState}</div>
-                          </div>
-                        );
-                      }
-                      if (part.type === "step-start") {
-                        return null;
-                      }
-                      return (
-                        <div
-                          key={`${message.id}-part-${index}`}
-                          className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
-                        >
-                          Unsupported part: {part.type}
-                        </div>
-                      );
+                         return (
+                           <div
+                             key={partKey}
+                             className="rounded-xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted"
+                           >
+                             Unsupported part: {part.type}
+                           </div>
+                         );
                     })}
                   </div>
                 </div>
