@@ -473,6 +473,7 @@ export function ChatPanel({
 
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const isAtBottomRef = useRef(true);
 
   const updateIsAtBottom = useCallback(() => {
@@ -528,6 +529,7 @@ export function ChatPanel({
     const raf = requestAnimationFrame(() => {
       scrollToBottom("auto");
       updateIsAtBottom();
+      inputRef.current?.focus();
     });
 
     return () => {
@@ -1156,8 +1158,15 @@ export function ChatPanel({
           >
             <div className="flex flex-col gap-3">
               <textarea
+                ref={inputRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && event.ctrlKey) {
+                    event.preventDefault();
+                    void handleSubmit();
+                  }
+                }}
                 placeholder="Type a message to get started..."
                 className="min-h-24 max-h-40 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-60"
                 disabled={false}
