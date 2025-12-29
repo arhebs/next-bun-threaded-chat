@@ -1,56 +1,42 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   convertToModelMessages,
-  createUIMessageStream,
-  createUIMessageStreamResponse,
   generateId,
   streamText,
   validateUIMessages,
 } from "ai";
 import type { Tool, UIMessage } from "ai";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
+import { handleMockChat } from "@/lib/chat/mock-handler";
 import { SYSTEM_PROMPT } from "@/lib/chat/prompt";
-import {
-  confirmActionOutputSchema,
-  type ConfirmActionOutput,
-} from "@/lib/chat/tool-types";
+import { saveChatHistory } from "@/lib/chat/persistence";
+import { normalizeToolParts } from "@/lib/chat/tool-part-normalize";
 import { tools } from "@/lib/chat/tools";
-import { upsertMessages } from "@/lib/db/messages";
-import {
-  deleteThread as deleteThreadFromDb,
-  getThread,
-  setThreadTitleIfEmpty,
-  touchThread,
-} from "@/lib/db/threads";
+import { env } from "@/lib/env";
 import { parseMentions } from "@/lib/xlsx/mentions";
-import { readRange as readRangeFromXlsx } from "@/lib/xlsx/read";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
-
 const MAX_PREFETCHED_MENTIONS = 3;
 
-type ChatRequestBody = {
-  id?: string;
-  messages?: unknown;
-};
+const chatSchema = z.object({
+  id: z
+    .string({ error: "Missing thread id" })
+    .trim()
+    .min(1, "Missing thread id"),
+  messages: z.array(z.unknown(), { error: "Missing messages" }),
+});
 
-function readEnv(key: string): string | undefined {
-  const value = process.env[key];
-  if (!value) {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
+type TextPart = Extract<UIMessage["parts"][number], { type: "text" }>;
 
 function buildExtraHeaders(): Record<string, string> | undefined {
   const headers: Record<string, string> = {};
-  const referer = readEnv("OPENAI_REFERER");
-  const title = readEnv("OPENAI_TITLE");
+  const referer = env.OPENAI_REFERER;
+  const title = env.OPENAI_TITLE;
 
   if (referer) {
     headers["HTTP-Referer"] = referer;
@@ -63,36 +49,8 @@ function buildExtraHeaders(): Record<string, string> | undefined {
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-type TextPart = Extract<UIMessage["parts"][number], { type: "text" }>;
-
-function deriveThreadTitle(messages: UIMessage[]): string | null {
-  const firstUser = messages.find((message) => message.role === "user");
-  if (!firstUser) {
-    return null;
-  }
-
-  const raw = firstUser.parts
-    .filter((part): part is TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("")
-    .trim();
-
-  if (!raw) {
-    return null;
-  }
-
-  const normalized = raw.replace(/\s+/g, " ").trim();
-  const maxLength = 30;
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength).trimEnd()}...`;
-}
-
 function isMockChatEnabled(): boolean {
-  return readEnv("MOCK_CHAT") === "1" || readEnv("PLAYWRIGHT") === "1";
+  return env.MOCK_CHAT === "1" || env.PLAYWRIGHT === "1";
 }
 
 function extractLastUserText(messages: UIMessage[]): string {
@@ -112,79 +70,77 @@ function extractLastUserText(messages: UIMessage[]): string {
   return "";
 }
 
-function extractConfirmOutputFromMessage(
-  message: UIMessage | undefined
-): ConfirmActionOutput | null {
-  if (!message || message.role !== "assistant") {
+function buildMentionContext(uiMessages: UIMessage[]): string | null {
+  const lastUserText = extractLastUserText(uiMessages);
+  if (!lastUserText.includes("@")) {
     return null;
   }
 
-  for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex--) {
-    const part = message.parts[partIndex] as unknown;
-    if (!part || typeof part !== "object") {
+  const mentions = parseMentions(lastUserText);
+  if (mentions.length === 0) {
+    return null;
+  }
+
+  const unique = new Set<string>();
+  const supported: { sheet: string; range: string }[] = [];
+  const unsupported: { sheet: string; range: string }[] = [];
+
+  for (const mention of mentions) {
+    const key = `${mention.sheet}!${mention.range}`;
+    if (unique.has(key)) {
       continue;
     }
+    unique.add(key);
 
-    const record = part as Record<string, unknown>;
-    if (record.type !== "tool-confirmAction") {
-      continue;
+    if (mention.sheet === "Sheet1") {
+      if (supported.length < MAX_PREFETCHED_MENTIONS) {
+        supported.push({ sheet: mention.sheet, range: mention.range });
+      }
+    } else {
+      unsupported.push({ sheet: mention.sheet, range: mention.range });
     }
+  }
 
-    const output = record.output;
-    if (output == null) {
-      continue;
-    }
+  if (supported.length > 0) {
+    return [
+      `User mentioned these spreadsheet ranges: ${JSON.stringify(supported)}.`,
+      "Use the readRange tool to load them before answering.",
+      "Do not guess cell contents without reading.",
+    ].join(" ");
+  }
 
-    const parsed = confirmActionOutputSchema.safeParse(output);
-    if (parsed.success) {
-      return parsed.data;
-    }
+  if (unsupported.length > 0) {
+    return [
+      `User mentioned ranges outside supported sheets: ${JSON.stringify(unsupported)}.`,
+      "Only Sheet1 is supported.",
+    ].join(" ");
   }
 
   return null;
 }
 
-function messageHasToolOutput(message: UIMessage | undefined, toolType: string): boolean {
-  if (!message || message.role !== "assistant") {
-    return false;
-  }
-
-  return message.parts.some((part) => {
-    if (!part || typeof part !== "object") {
-      return false;
-    }
-
-    const record = part as Record<string, unknown>;
-    if (record.type !== toolType) {
-      return false;
-    }
-
-    if (record.state === "output-error") {
-      return true;
-    }
-
-    return record.output != null;
-  });
-}
-
 export async function POST(request: Request): Promise<Response> {
   try {
-    const body = (await request.json()) as ChatRequestBody;
-    const threadId = typeof body.id === "string" ? body.id.trim() : "";
+    const json: unknown = await request.json();
+    const parsedBody = chatSchema.safeParse(json);
 
-    if (!threadId) {
-      return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
+    if (!parsedBody.success) {
+      const messages = new Set(parsedBody.error.issues.map((issue) => issue.message));
+      if (messages.has("Missing thread id")) {
+        return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
+      }
+      if (messages.has("Missing messages")) {
+        return NextResponse.json({ error: "Missing messages" }, { status: 400 });
+      }
+      return NextResponse.json({ error: parsedBody.error.flatten() }, { status: 400 });
     }
 
-    if (!Array.isArray(body.messages)) {
-      return NextResponse.json({ error: "Missing messages" }, { status: 400 });
-    }
-
+    const { id: threadId, messages: rawMessages } = parsedBody.data;
     const toolSet = tools as unknown as Record<string, Tool<unknown, unknown>>;
 
     // `useChat` can temporarily include an in-flight assistant message with `parts: []`.
     // The server validator requires every message to contain at least one part.
-    const incomingMessages = body.messages.filter((message) => {
+    const incomingMessages = rawMessages.filter((message) => {
       if (message && typeof message === "object" && "parts" in message) {
         const parts = (message as { parts?: unknown }).parts;
         if (Array.isArray(parts) && parts.length === 0) {
@@ -194,206 +150,106 @@ export async function POST(request: Request): Promise<Response> {
       return true;
     });
 
+    const sanitizedIncomingMessages = incomingMessages
+      .map((message) => {
+        if (!message || typeof message !== "object" || !("parts" in message)) {
+          return message;
+        }
+
+        const parts = (message as { parts?: unknown }).parts;
+        if (!Array.isArray(parts)) {
+          return message;
+        }
+
+        const cleanedParts = parts.filter((part) => {
+          if (!part || typeof part !== "object") {
+            return true;
+          }
+
+          const record = part as Record<string, unknown>;
+          const type = record.type;
+          const toolCallId = record.toolCallId;
+
+          const isToolPart =
+            type === "dynamic-tool" ||
+            (typeof type === "string" && type.startsWith("tool-"));
+
+          if (!isToolPart) {
+            return true;
+          }
+
+          if (typeof toolCallId !== "string" || toolCallId.trim().length === 0) {
+            return false;
+          }
+
+          const state = record.state;
+          const stateText = typeof state === "string" ? state : "";
+          const needsInput = stateText.startsWith("input");
+
+          if (needsInput && !("input" in record)) {
+            return false;
+          }
+
+          if (needsInput && record.input == null) {
+            return false;
+          }
+
+          return true;
+        });
+
+        return {
+          ...(message as Record<string, unknown>),
+          parts: cleanedParts,
+        };
+      })
+      .filter((message) => {
+        if (!message || typeof message !== "object" || !("parts" in message)) {
+          return true;
+        }
+        const parts = (message as { parts?: unknown }).parts;
+        return !Array.isArray(parts) || parts.length > 0;
+      });
+
     const validated = await validateUIMessages({
-      messages: incomingMessages,
+      messages: sanitizedIncomingMessages,
       tools: toolSet,
     });
 
     if (isMockChatEnabled()) {
-      const lastMessage = validated[validated.length - 1];
-      const confirmation = extractConfirmOutputFromMessage(lastMessage);
-      const lastUserText = extractLastUserText(validated);
-      const shouldContinue = lastMessage?.role === "assistant";
-      const hasReadRangeOutput = messageHasToolOutput(lastMessage, "tool-readRange");
-      const hasDeleteThreadOutput = messageHasToolOutput(
-        lastMessage,
-        "tool-deleteThread"
-      );
-
-      const stream = createUIMessageStream({
-        originalMessages: validated,
-        generateId,
-        execute: ({ writer }) => {
-          if (shouldContinue) {
-            writer.write({ type: "start" });
-          } else {
-            writer.write({ type: "start", messageId: generateId() });
-          }
-
-          writer.write({ type: "start-step" });
-
-          const writeText = (text: string) => {
-            const textId = generateId();
-            writer.write({ type: "text-start", id: textId });
-            writer.write({ type: "text-delta", id: textId, delta: text });
-            writer.write({ type: "text-end", id: textId });
-          };
-
-          if (hasDeleteThreadOutput) {
-            writeText("Thread deletion complete.");
-          } else if (hasReadRangeOutput) {
-            writeText(
-              "Range loaded. You can click the table preview to open the modal and select cells."
-            );
-          } else if (confirmation) {
-            if (!confirmation.approved) {
-              writeText("Action canceled.");
-            } else if (confirmation.action === "deleteThread") {
-              const targetThreadId = confirmation.actionPayload.threadId;
-              const toolCallId = generateId();
-
-              writer.write({
-                type: "tool-input-available",
-                toolCallId,
-                toolName: "deleteThread",
-                input: {
-                  threadId: targetThreadId,
-                  confirmationToken: confirmation.confirmationToken,
-                },
-              });
-
-              const deleted = deleteThreadFromDb(targetThreadId);
-
-              writer.write({
-                type: "tool-output-available",
-                toolCallId,
-                output: {
-                  threadId: targetThreadId,
-                  deleted,
-                },
-              });
-
-              writeText("Action confirmed.");
-            } else {
-              writeText("Action confirmed.");
-            }
-          } else if (/\bdelete\b/i.test(lastUserText)) {
-            writeText("I need your confirmation before deleting.");
-            writer.write({
-              type: "tool-input-available",
-              toolCallId: generateId(),
-              toolName: "confirmAction",
-              input: {
-                action: "deleteThread",
-                actionPayload: { threadId },
-                prompt: "Delete this thread?",
-              },
-            });
-          } else {
-            const mentions = lastUserText.includes("@")
-              ? parseMentions(lastUserText)
-              : [];
-
-            const unique = new Set<string>();
-            const sheet1Mentions = [] as { sheet: string; range: string }[];
-            const unsupportedMentions = [] as { sheet: string; range: string }[];
-
-            for (const mention of mentions) {
-              const key = `${mention.sheet}!${mention.range}`;
-              if (unique.has(key)) {
-                continue;
-              }
-              unique.add(key);
-
-              if (mention.sheet === "Sheet1") {
-                if (sheet1Mentions.length < MAX_PREFETCHED_MENTIONS) {
-                  sheet1Mentions.push({ sheet: mention.sheet, range: mention.range });
-                }
-              } else {
-                unsupportedMentions.push({ sheet: mention.sheet, range: mention.range });
-              }
-            }
-
-            if (sheet1Mentions.length > 0) {
-              for (const mention of sheet1Mentions) {
-                const toolCallId = generateId();
-
-                writer.write({
-                  type: "tool-input-available",
-                  toolCallId,
-                  toolName: "readRange",
-                  input: {
-                    sheet: "Sheet1",
-                    range: mention.range,
-                  },
-                });
-
-                try {
-                  const result = readRangeFromXlsx({
-                    sheet: "Sheet1",
-                    range: mention.range,
-                  });
-
-                  writer.write({
-                    type: "tool-output-available",
-                    toolCallId,
-                    output: result,
-                  });
-                } catch (error) {
-                  const message = error instanceof Error ? error.message : String(error);
-                  writer.write({
-                    type: "tool-output-error",
-                    toolCallId,
-                    errorText: message,
-                  });
-                }
-              }
-
-              writeText("Loaded mentioned range.");
-            } else if (unsupportedMentions.length > 0) {
-              writeText(
-                "Only Sheet1 is supported. Please use mentions like @Sheet1!A1:C5."
-              );
-            } else {
-              writeText("Mock response.");
-            }
-          }
-
-          writer.write({ type: "finish-step" });
-          writer.write({ type: "finish" });
-        },
+      return handleMockChat({
+        validatedMessages: validated,
+        threadId,
+        maxPrefetchedMentions: MAX_PREFETCHED_MENTIONS,
         onFinish: async ({ messages }) => {
-          if (!getThread(threadId)) {
-            return;
-          }
-
-          upsertMessages(threadId, messages);
-
-          const title = deriveThreadTitle(messages);
-          if (title) {
-            setThreadTitleIfEmpty(threadId, title);
-          }
-
-          touchThread(threadId);
+          await saveChatHistory(threadId, messages);
         },
       });
-
-      return createUIMessageStreamResponse({ stream });
     }
 
-    const modelMessages = await convertToModelMessages(validated, {
+    const normalizedForModel = normalizeToolParts(validated);
+
+    const modelMessages = await convertToModelMessages(normalizedForModel, {
       tools: toolSet,
       ignoreIncompleteToolCalls: true,
     });
 
-    const baseURL = readEnv("OPENAI_BASE_URL");
+    const baseURL = env.OPENAI_BASE_URL;
     const openai = createOpenAI({
-      apiKey: readEnv("OPENAI_API_KEY"),
+      apiKey: env.OPENAI_API_KEY,
       baseURL,
       headers: buildExtraHeaders(),
     });
 
-    const modelId = readEnv("OPENAI_MODEL") ?? DEFAULT_MODEL;
+    const modelId = env.OPENAI_MODEL ?? DEFAULT_MODEL;
 
     // The AI SDK OpenAI provider defaults to the newer Responses API when calling `openai(modelId)`.
     // Many OpenAI-compatible providers (including OpenRouter) support Chat Completions but not Responses.
-    const apiMode = readEnv("OPENAI_API_MODE");
+    const apiMode = env.OPENAI_API_MODE;
     const useChatCompletions = apiMode === "chat" || (apiMode == null && baseURL != null);
-    const model = useChatCompletions
-      ? openai.chat(modelId as never)
-      : openai(modelId as never);
+    const model = useChatCompletions ? openai.chat(modelId as never) : openai(modelId as never);
 
-    const mentionAppendix = null;
+    const mentionContext = buildMentionContext(validated);
+
     const threadAppendix = [
       "Thread context:",
       `- Current thread id: ${threadId}`,
@@ -401,7 +257,7 @@ export async function POST(request: Request): Promise<Response> {
       "- Never guess thread ids.",
     ].join("\n");
 
-    const system = [SYSTEM_PROMPT, threadAppendix, mentionAppendix]
+    const system = [SYSTEM_PROMPT, threadAppendix, mentionContext]
       .filter(Boolean)
       .join("\n\n");
 
@@ -412,7 +268,7 @@ export async function POST(request: Request): Promise<Response> {
       tools: toolSet,
       toolChoice: "auto",
       experimental_context: {
-        uiMessages: validated,
+        uiMessages: normalizedForModel,
       },
     });
 
@@ -420,18 +276,7 @@ export async function POST(request: Request): Promise<Response> {
       originalMessages: validated,
       generateMessageId: generateId,
       onFinish: async ({ messages }) => {
-        if (!getThread(threadId)) {
-          return;
-        }
-
-        upsertMessages(threadId, messages);
-
-        const title = deriveThreadTitle(messages);
-        if (title) {
-          setThreadTitleIfEmpty(threadId, title);
-        }
-
-        touchThread(threadId);
+        await saveChatHistory(threadId, messages);
       },
     });
   } catch (error) {
