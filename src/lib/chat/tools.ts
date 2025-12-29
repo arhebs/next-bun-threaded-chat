@@ -1,10 +1,11 @@
-import { tool, zodSchema } from "ai";
+import { tool } from "ai";
 
 import { deleteThread as deleteThreadFromDb } from "@/lib/db/threads";
 import { normalizeA1Cell } from "@/lib/xlsx/range";
 import { readRange } from "@/lib/xlsx/read";
 import { loadWorkbook, saveWorkbook } from "@/lib/xlsx/workbook";
-import { updateCell } from "@/lib/xlsx/write";
+import { withWorkbookLock } from "@/lib/xlsx/workbook-lock";
+import { updateCellInWorkbook } from "@/lib/xlsx/write";
 
 import { assertConfirmed, getContextMessages } from "./confirm-gate";
 import {
@@ -24,21 +25,20 @@ import {
 
 export const tools = {
   confirmAction: tool({
-    description:
-      "Ask the user to confirm a dangerous action before proceeding.",
-    inputSchema: zodSchema(confirmActionInputSchema),
-    outputSchema: zodSchema(confirmActionOutputSchema),
+    description: "Ask the user to confirm a dangerous action before proceeding.",
+    inputSchema: confirmActionInputSchema,
+    outputSchema: confirmActionOutputSchema,
   }),
   readRange: tool({
     description: "Read a Sheet1 A1 range and return its values.",
-    inputSchema: zodSchema(readRangeInputSchema),
-    outputSchema: zodSchema(readRangeOutputSchema),
+    inputSchema: readRangeInputSchema,
+    outputSchema: readRangeOutputSchema,
     execute: async (input) => readRange({ sheet: input.sheet, range: input.range }),
   }),
   updateCell: tool({
     description: "Update a single cell in Sheet1 (requires confirmation).",
-    inputSchema: zodSchema(updateCellInputSchema),
-    outputSchema: zodSchema(updateCellOutputSchema),
+    inputSchema: updateCellInputSchema,
+    outputSchema: updateCellOutputSchema,
     execute: async (input, options) => {
       const messages = getContextMessages(options.experimental_context);
       assertConfirmed(messages, {
@@ -51,25 +51,30 @@ export const tools = {
         },
       });
 
-      const result = updateCell({
-        sheet: input.sheet,
-        cell: input.cell,
-        value: input.value,
+      return await withWorkbookLock(() => {
+        const workbook = loadWorkbook();
+        const result = updateCellInWorkbook(workbook, {
+          sheet: input.sheet,
+          cell: input.cell,
+          value: input.value,
+        });
+
+        // In-process lock prevents concurrent writes within one server instance.
+        // Multi-instance/serverless deployments still need a distributed lock.
+        saveWorkbook(result.workbook);
+
+        return {
+          sheet: result.sheet,
+          cell: result.cell,
+          value: result.value,
+        };
       });
-
-      saveWorkbook(result.workbook);
-
-      return {
-        sheet: result.sheet,
-        cell: result.cell,
-        value: result.value,
-      };
     },
   }),
   deleteThread: tool({
     description: "Delete a thread by id (requires confirmation).",
-    inputSchema: zodSchema(deleteThreadInputSchema),
-    outputSchema: zodSchema(deleteThreadOutputSchema),
+    inputSchema: deleteThreadInputSchema,
+    outputSchema: deleteThreadOutputSchema,
     execute: async (input, options) => {
       const messages = getContextMessages(options.experimental_context);
       assertConfirmed(messages, {
@@ -90,8 +95,8 @@ export const tools = {
   }),
   sendInvites: tool({
     description: "Mock tool that pretends to send email invites.",
-    inputSchema: zodSchema(sendInvitesInputSchema),
-    outputSchema: zodSchema(sendInvitesOutputSchema),
+    inputSchema: sendInvitesInputSchema,
+    outputSchema: sendInvitesOutputSchema,
     execute: async (input) => ({
       sent: input.emails,
       message: input.message,
@@ -99,8 +104,8 @@ export const tools = {
   }),
   explainFormula: tool({
     description: "Explain the formula in a given Sheet1 cell.",
-    inputSchema: zodSchema(explainFormulaInputSchema),
-    outputSchema: zodSchema(explainFormulaOutputSchema),
+    inputSchema: explainFormulaInputSchema,
+    outputSchema: explainFormulaOutputSchema,
     execute: async (input) => {
       const workbook = loadWorkbook();
       const worksheet = workbook.Sheets[input.sheet];

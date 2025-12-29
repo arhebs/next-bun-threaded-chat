@@ -12,6 +12,12 @@ export type UpdateCellResult = {
   value: CellValue;
 };
 
+type UpdateCellInput = {
+  sheet: string;
+  cell: string;
+  value: CellValue;
+};
+
 function assertSheetName(sheet: string): asserts sheet is "Sheet1" {
   if (sheet !== "Sheet1") {
     throw new Error(`Only Sheet1 is supported (got ${sheet}).`);
@@ -87,13 +93,11 @@ function buildCellObject(value: Exclude<CellValue, null>): XLSX.CellObject {
   };
 }
 
-export function updateCell(input: {
-  sheet: string;
-  cell: string;
-  value: CellValue;
-}): UpdateCellResult {
+export function updateCellInWorkbook(
+  workbook: XLSX.WorkBook,
+  input: UpdateCellInput
+): UpdateCellResult {
   assertSheetName(input.sheet);
-  const workbook = loadWorkbook();
   const worksheet = getOrCreateSheet(workbook, input.sheet);
 
   const parsedCell = parseA1Cell(input.cell);
@@ -118,4 +122,9 @@ export function updateCell(input: {
     cell: normalizedCell,
     value: input.value,
   };
+}
+
+export function updateCell(input: UpdateCellInput): UpdateCellResult {
+  const workbook = loadWorkbook();
+  return updateCellInWorkbook(workbook, input);
 }
