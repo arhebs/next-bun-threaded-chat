@@ -13,9 +13,44 @@ const sendMessageCalls: unknown[] = [];
 const addToolOutputCalls: unknown[] = [];
 
 mock.module("@ai-sdk/react", () => {
+  class Chat {
+    id: string;
+    messages: UIMessage[];
+
+    constructor({ id, messages }: { id: string; messages?: UIMessage[] }) {
+      this.id = id;
+      this.messages = messages ?? [];
+    }
+  }
+
   return {
+    Chat,
     useChat: (options: any) => {
-      const [messages, setMessages] = useState<UIMessage[]>(options.messages ?? []);
+      const chat = options?.chat;
+      const initialMessages: UIMessage[] = Array.isArray(chat?.messages)
+        ? chat.messages
+        : options.messages ?? [];
+
+      const [messages, setMessagesState] = useState<UIMessage[]>(initialMessages);
+
+      const setMessages = (next: unknown) => {
+        setMessagesState((current) => {
+          const resolved =
+            typeof next === "function"
+              ? (next as (messages: UIMessage[]) => UIMessage[])(current)
+              : (next as UIMessage[]);
+
+          if (chat) {
+            chat.messages = resolved;
+          }
+
+          return resolved;
+        });
+      };
+
+      const clearError = () => {
+        // no-op
+      };
 
       const addToolOutput = async (call: unknown) => {
         addToolOutputCalls.push(call);
@@ -30,6 +65,7 @@ mock.module("@ai-sdk/react", () => {
         setMessages,
         addToolOutput,
         sendMessage,
+        clearError,
         status: "ready",
         error: null,
       };
@@ -267,6 +303,39 @@ describe("ChatPanel", () => {
 
     expect(textarea.value).toBe("Check @Sheet1!A2:B2");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("renders markdown tables as a UI table", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: ["| ID | Name |", "| --- | --- |", "| 1 | Ava Chen |"].join("\n"),
+          },
+        ],
+      },
+    ];
+
+    render(
+      <ChatPanel
+        thread={THREAD}
+        initialMessages={messages}
+        isLoading={false}
+        error={null}
+      />
+    );
+
+    const table = screen.getByRole("table", { name: "Markdown table" });
+    expect(table).toBeTruthy();
+
+    const tableScope = within(table);
+    expect(tableScope.getByText("ID")).toBeTruthy();
+    expect(tableScope.getByText("Name")).toBeTruthy();
+    expect(tableScope.getByText("1")).toBeTruthy();
+    expect(tableScope.getByText("Ava Chen")).toBeTruthy();
   });
 
   it("emits confirmAction tool output on approve/decline", async () => {

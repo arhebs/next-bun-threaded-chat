@@ -1,40 +1,96 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ThreadSidebar } from "@/components/chat/ThreadSidebar";
 import { fetchThreadMessages, listThreads, type Thread } from "@/lib/client/api";
 
+function deriveThreadTitleFromText(text: string): string | null {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const maxLength = 30;
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength).trimEnd()}...`;
+}
+
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const explicitSelectionRef = useRef<string | null>(null);
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
+  const [messagesByThreadId, setMessagesByThreadId] = useState<Record<string, UIMessage[]>>(
+    {}
+  );
+  const messagesByThreadIdRef = useRef(messagesByThreadId);
+  messagesByThreadIdRef.current = messagesByThreadId;
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleThreadsChange = useCallback((nextThreads: Thread[]) => {
     setThreads(nextThreads);
+
+    setMessagesByThreadId((current) => {
+      if (Object.keys(current).length === 0) {
+        return current;
+      }
+
+      const allowed = new Set(nextThreads.map((thread) => thread.id));
+      let changed = false;
+      const next: Record<string, UIMessage[]> = {};
+
+      for (const [threadId, messages] of Object.entries(current)) {
+        if (allowed.has(threadId)) {
+          next[threadId] = messages;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+
     setSelectedThreadId((current) => {
       if (nextThreads.length === 0) {
+        explicitSelectionRef.current = null;
         setInitialMessages([]);
         setMessageError(null);
         setIsLoadingMessages(false);
         return null;
       }
 
+      const explicitSelection = explicitSelectionRef.current;
+      const hasExplicitSelection = Boolean(
+        explicitSelection && nextThreads.some((thread) => thread.id === explicitSelection)
+      );
+
       const currentIsValid = Boolean(
         current && nextThreads.some((thread) => thread.id === current)
       );
 
-      const nextId = currentIsValid ? current : nextThreads[0]?.id ?? null;
+      const nextId = hasExplicitSelection
+        ? (explicitSelection as string)
+        : currentIsValid
+          ? current
+          : nextThreads[0]?.id ?? null;
 
       if (nextId && nextId !== current) {
-        setInitialMessages([]);
+        const cached = messagesByThreadIdRef.current[nextId];
+        setInitialMessages(cached ?? []);
         setMessageError(null);
         setIsLoadingMessages(true);
+      }
+
+      if (explicitSelection && !hasExplicitSelection) {
+        explicitSelectionRef.current = null;
       }
 
       return nextId;
@@ -49,8 +105,10 @@ export default function Home() {
         return;
       }
 
+      explicitSelectionRef.current = threadId;
       setSelectedThreadId(threadId);
-      setInitialMessages([]);
+      const cached = messagesByThreadIdRef.current[threadId];
+      setInitialMessages(cached ?? []);
       setMessageError(null);
 
       if (options?.skipMessageLoad) {
@@ -79,6 +137,39 @@ export default function Home() {
       console.error("Failed to refresh threads", err);
     }
   }, [handleThreadsChange]);
+
+  const touchThread = useCallback(
+    (threadId: string, options?: { titleCandidate?: string }) => {
+      const now = Date.now();
+      const titleCandidate = options?.titleCandidate;
+      const derivedTitle = titleCandidate ? deriveThreadTitleFromText(titleCandidate) : null;
+
+      setThreads((current) => {
+        const next = current.map((thread) => {
+          if (thread.id !== threadId) {
+            return thread;
+          }
+
+          return {
+            ...thread,
+            title: thread.title || !derivedTitle ? thread.title : derivedTitle,
+            updatedAt: now,
+          };
+        });
+
+        next.sort((left, right) => {
+          const diff = right.updatedAt - left.updatedAt;
+          if (diff !== 0) {
+            return diff;
+          }
+          return left.id.localeCompare(right.id);
+        });
+
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!isSidebarOpen) {
@@ -109,6 +200,10 @@ export default function Home() {
       .then((messages) => {
         if (active) {
           setInitialMessages(messages);
+          setMessagesByThreadId((current) => ({
+            ...current,
+            [selectedThreadId]: messages,
+          }));
         }
       })
       .catch((err) => {
@@ -157,6 +252,7 @@ export default function Home() {
             isLoading={isLoadingMessages}
             error={messageError}
             onThreadsRefreshAction={refreshThreads}
+            onThreadTouchAction={touchThread}
             onOpenThreadsAction={openSidebar}
           />
         </div>

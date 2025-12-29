@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
-import { useChat } from "@ai-sdk/react";
+import { Chat, useChat } from "@ai-sdk/react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 
 import { ConfirmationCard } from "@/components/ui/ConfirmationCard";
 import { TableModal } from "@/components/ui/TableModal";
@@ -24,6 +27,7 @@ type ChatPanelProps = {
   isLoading: boolean;
   error: string | null;
   onThreadsRefreshAction?: () => void;
+  onThreadTouchAction?: (threadId: string, options?: { titleCandidate?: string }) => void;
   onOpenThreadsAction?: () => void;
 };
 
@@ -71,223 +75,147 @@ type DeleteThreadPart = ChatPart & {
 
 type ConfirmStatus = "pending" | "approved" | "denied" | "error";
 
-type MarkdownBlock =
-  | { type: "paragraph"; content: string }
-  | { type: "ul"; items: string[] }
-  | { type: "ol"; items: string[] }
-  | { type: "code"; language?: string; content: string };
+function sanitizeMarkdownHref(href: string | undefined): string | undefined {
+  if (!href) {
+    return undefined;
+  }
 
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-  const regex = /`([^`]+)`/g;
+  const trimmed = href.trim();
+  if (!trimmed) {
+    return undefined;
+  }
 
-  for (const match of text.matchAll(regex)) {
-    if (match.index == null) {
-      continue;
+  if (trimmed.startsWith("#") || trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  if (/^(mailto:|tel:)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return undefined;
+}
+
+const MARKDOWN_COMPONENTS: Components = {
+  a: ({ href, children }) => {
+    const safeHref = sanitizeMarkdownHref(href);
+    const isExternal = typeof safeHref === "string" && /^https?:\/\//i.test(safeHref);
+
+    if (!safeHref) {
+      return <span className="font-medium text-foreground">{children}</span>;
     }
 
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-
-    const code = match[1] ?? "";
-    nodes.push(
-      <code
-        key={`${keyPrefix}-code-${match.index}`}
-        className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground"
+    return (
+      <a
+        href={safeHref}
+        target={isExternal ? "_blank" : undefined}
+        rel={isExternal ? "noreferrer noopener" : undefined}
+        className="font-medium text-accent underline underline-offset-4 transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
-        {code}
-      </code>
+        {children}
+      </a>
     );
+  },
+  table: ({ children }) => (
+    <div className="not-prose my-4 overflow-x-auto rounded-2xl border border-border bg-surface-muted">
+      <table
+        aria-label="Markdown table"
+        className="min-w-full border-collapse text-left text-xs"
+      >
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-surface">{children}</thead>,
+  tbody: ({ children }) => (
+    <tbody className="[&>tr:last-child]:border-b-0">{children}</tbody>
+  ),
+  tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
+  th: ({ children }) => (
+    <th className="border-r border-border px-3 py-2 text-xs font-semibold text-foreground last:border-r-0">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border-r border-border px-3 py-2 align-top text-sm text-muted last:border-r-0">
+      {children}
+    </td>
+  ),
+  pre: ({ children }) => {
+    const child = Array.isArray(children) ? children[0] : children;
 
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
-}
-
-function parseTextLinesToBlocks(lines: string[]): MarkdownBlock[] {
-  const blocks: MarkdownBlock[] = [];
-  const unordered = /^\s*[-*+]\s+(.*)$/;
-  const ordered = /^\s*\d+\.\s+(.*)$/;
-
-  let index = 0;
-
-  while (index < lines.length) {
-    while (index < lines.length && (lines[index] ?? "").trim() === "") {
-      index++;
-    }
-
-    if (index >= lines.length) {
-      break;
-    }
-
-    const line = lines[index] ?? "";
-    const unorderedMatch = line.match(unordered);
-    const orderedMatch = line.match(ordered);
-
-    if (unorderedMatch) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const match = (lines[index] ?? "").match(unordered);
-        if (!match) {
-          break;
-        }
-        items.push(match[1] ?? "");
-        index++;
-      }
-      blocks.push({ type: "ul", items });
-      continue;
-    }
-
-    if (orderedMatch) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const match = (lines[index] ?? "").match(ordered);
-        if (!match) {
-          break;
-        }
-        items.push(match[1] ?? "");
-        index++;
-      }
-      blocks.push({ type: "ol", items });
-      continue;
-    }
-
-    const paragraphLines: string[] = [];
-    while (index < lines.length) {
-      const current = lines[index] ?? "";
-      if (current.trim() === "") {
-        break;
-      }
-      if (unordered.test(current) || ordered.test(current)) {
-        break;
-      }
-      paragraphLines.push(current);
-      index++;
-    }
-
-    if (paragraphLines.length > 0) {
-      blocks.push({ type: "paragraph", content: paragraphLines.join("\n") });
-    }
-  }
-
-  return blocks;
-}
-
-function parseMarkdownToBlocks(text: string): MarkdownBlock[] {
-  const normalized = text.replace(/\r\n/g, "\n");
-  const lines = normalized.split("\n");
-
-  const blocks: MarkdownBlock[] = [];
-  const textBuffer: string[] = [];
-
-  const flushText = () => {
-    if (textBuffer.length === 0) {
-      return;
-    }
-    blocks.push(...parseTextLinesToBlocks(textBuffer));
-    textBuffer.length = 0;
-  };
-
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-    const fence = line.match(/^\s*```(\w+)?\s*$/);
-
-    if (fence) {
-      flushText();
-      const language = fence[1] ? fence[1] : undefined;
-      index++;
-
-      const codeLines: string[] = [];
-      while (index < lines.length) {
-        const current = lines[index] ?? "";
-        if (/^\s*```/.test(current)) {
-          break;
-        }
-        codeLines.push(current);
-        index++;
-      }
-
-      if (index < lines.length && /^\s*```/.test(lines[index] ?? "")) {
-        index++;
-      }
-
-      blocks.push({ type: "code", language, content: codeLines.join("\n") });
-      continue;
-    }
-
-    textBuffer.push(line);
-    index++;
-  }
-
-  flushText();
-  return blocks;
-}
-
-function renderMarkdownBlocks(text: string, keyPrefix: string): ReactNode[] {
-  const blocks = parseMarkdownToBlocks(text);
-
-  return blocks.map((block, index) => {
-    const key = `${keyPrefix}-block-${index}`;
-
-    if (block.type === "paragraph") {
+    if (!child || typeof child !== "object" || !("props" in child)) {
       return (
-        <p key={key} className="whitespace-pre-wrap break-words">
-          {renderInlineMarkdown(block.content, key)}
-        </p>
+        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-foreground">
+          {children}
+        </pre>
       );
     }
 
-    if (block.type === "ul") {
-      return (
-        <ul key={key} className="list-disc space-y-1 pl-5">
-          {block.items.map((item, itemIndex) => (
-            <li
-              key={`${key}-item-${itemIndex}`}
-              className="whitespace-pre-wrap break-words"
-            >
-              {renderInlineMarkdown(item, `${key}-item-${itemIndex}`)}
-            </li>
-          ))}
-        </ul>
-      );
-    }
+    const codeElement = child as { props?: { className?: unknown; children?: unknown } };
+    const className =
+      typeof codeElement.props?.className === "string" ? codeElement.props.className : "";
+    const raw = codeElement.props?.children;
+    const content = Array.isArray(raw)
+      ? raw.join("")
+      : typeof raw === "string"
+        ? raw
+        : String(raw ?? "");
+    const normalized = content.replace(/\n$/, "");
+    const match = /language-(\w+)/.exec(className);
+    const language = match?.[1];
 
-    if (block.type === "ol") {
+    return (
+      <div className="not-prose my-4 rounded-2xl border border-border bg-surface-muted p-3">
+        {language ? (
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+            {language}
+          </div>
+        ) : null}
+        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-foreground">
+          <code>{normalized}</code>
+        </pre>
+      </div>
+    );
+  },
+  code: ({ node: _node, className, children, ...props }) => {
+    const raw = Array.isArray(children) ? children.join("") : String(children ?? "");
+    const content = raw.replace(/\n$/, "");
+
+    const preserveClassName =
+      typeof className === "string" && (/language-/.test(className) || content.includes("\n"));
+
+    if (preserveClassName) {
       return (
-        <ol key={key} className="list-decimal space-y-1 pl-5">
-          {block.items.map((item, itemIndex) => (
-            <li
-              key={`${key}-item-${itemIndex}`}
-              className="whitespace-pre-wrap break-words"
-            >
-              {renderInlineMarkdown(item, `${key}-item-${itemIndex}`)}
-            </li>
-          ))}
-        </ol>
+        <code {...props} className={`not-prose ${className}`}>
+          {content}
+        </code>
       );
     }
 
     return (
-      <div key={key} className="rounded-2xl border border-border bg-surface-muted p-3">
-        {block.language ? (
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
-            {block.language}
-          </div>
-        ) : null}
-        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-foreground">
-          <code>{block.content}</code>
-        </pre>
-      </div>
+      <code
+        {...props}
+        className="not-prose rounded bg-surface-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground"
+      >
+        {content}
+      </code>
     );
-  });
+  },
+};
+
+function renderMarkdownBlocks(text: string, _keyPrefix: string): ReactNode {
+  return (
+    <div className="space-y-3 prose prose-sm prose-neutral dark:prose-invert max-w-none break-words">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={MARKDOWN_COMPONENTS}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function isTextLikePart(part: ChatPart): part is TextLikePart {
@@ -400,6 +328,7 @@ export function ChatPanel({
   isLoading,
   error,
   onThreadsRefreshAction,
+  onThreadTouchAction,
   onOpenThreadsAction,
 }: ChatPanelProps) {
   const threadId = thread?.id ?? "no-thread";
@@ -437,23 +366,110 @@ export function ChatPanel({
 
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
 
+  const chatsByThreadIdRef = useRef(new Map<string, Chat<UIMessage>>());
+
+  const chat = useMemo(() => {
+    const existing = chatsByThreadIdRef.current.get(threadId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = new Chat<UIMessage>({
+      id: threadId,
+      messages: [],
+      transport,
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    });
+
+    chatsByThreadIdRef.current.set(threadId, created);
+    return created;
+  }, [threadId, transport]);
+
   const {
     messages,
     setMessages,
     addToolOutput,
     sendMessage,
+    clearError,
     status: chatStatus,
     error: chatError,
-  } = useChat({
-    id: threadId,
-    messages: initialMessages,
-    transport,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-  });
+  } = useChat({ chat });
+
+  const [isCrossfading, setIsCrossfading] = useState(false);
+  const hasMountedRef = useRef(false);
 
   useEffect(() => {
+    const shouldAnimate = hasMountedRef.current;
+    hasMountedRef.current = true;
+
+    if (!shouldAnimate) {
+      return;
+    }
+
+    setIsCrossfading(true);
+    const timeout = setTimeout(() => {
+      setIsCrossfading(false);
+    }, 250);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [threadId]);
+
+  useLayoutEffect(() => {
+    if (initialMessages.length === 0) {
+      return;
+    }
+
+    if (chat.messages.length > 0) {
+      return;
+    }
+
     setMessages(initialMessages);
-  }, [initialMessages, setMessages]);
+  }, [chat, initialMessages, setMessages]);
+
+  const [showHistoryLoadingIndicator, setShowHistoryLoadingIndicator] = useState(false);
+  const historyLoadingShownAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setShowHistoryLoadingIndicator(false);
+    historyLoadingShownAtRef.current = null;
+  }, [threadId]);
+
+  useEffect(() => {
+    const delayMs = 150;
+    const minVisibleMs = 250;
+
+    if (isLoading) {
+      const timeout = setTimeout(() => {
+        historyLoadingShownAtRef.current = Date.now();
+        setShowHistoryLoadingIndicator(true);
+      }, delayMs);
+
+      return () => clearTimeout(timeout);
+    }
+
+    if (!showHistoryLoadingIndicator) {
+      return;
+    }
+
+    const shownAt = historyLoadingShownAtRef.current ?? Date.now();
+    const elapsed = Date.now() - shownAt;
+    const remaining = minVisibleMs - elapsed;
+
+    if (remaining <= 0) {
+      setShowHistoryLoadingIndicator(false);
+      historyLoadingShownAtRef.current = null;
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setShowHistoryLoadingIndicator(false);
+      historyLoadingShownAtRef.current = null;
+    }, remaining);
+
+    return () => clearTimeout(timeout);
+  }, [isLoading, showHistoryLoadingIndicator]);
 
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -561,7 +577,7 @@ export function ChatPanel({
       ? "Untitled thread"
       : "No thread selected";
 
-  const loadingMessage = isLoading ? "Loading messages..." : null;
+  const loadingMessage = showHistoryLoadingIndicator ? "Loading messages..." : null;
   const isChatBusy = chatStatus === "submitted" || chatStatus === "streaming";
   const chatStatusLabel =
     chatStatus === "submitted"
@@ -569,7 +585,19 @@ export function ChatPanel({
       : chatStatus === "streaming"
         ? "Streaming"
         : "Ready";
-  const status = error || chatError ? "Error" : loadingMessage ? "Loading" : chatStatusLabel;
+
+  const renderedMessages = useMemo(
+    () => messages.filter((message) => message.parts.length > 0),
+    [messages]
+  );
+
+  const status = isChatBusy
+    ? chatStatusLabel
+    : loadingMessage
+      ? "Loading"
+      : error || chatError
+        ? "Error"
+        : chatStatusLabel;
 
   useEffect(() => {
     if (!isAtBottomRef.current) {
@@ -584,7 +612,7 @@ export function ChatPanel({
     return () => {
       cancelAnimationFrame(raf);
     };
-  }, [isChatBusy, messages, scrollToBottom]);
+  }, [isChatBusy, renderedMessages, scrollToBottom]);
 
   const visibleMessageCount = useMemo(() => {
     if (!thread) {
@@ -592,20 +620,20 @@ export function ChatPanel({
     }
 
     if (!isChatBusy) {
-      return messages.length;
+      return renderedMessages.length;
     }
 
-    if (messages.length === 0) {
+    if (renderedMessages.length === 0) {
       return 0;
     }
 
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage = renderedMessages[renderedMessages.length - 1];
     if (lastMessage?.role === "assistant") {
-      return Math.max(0, messages.length - 1);
+      return Math.max(0, renderedMessages.length - 1);
     }
 
-    return messages.length;
-  }, [isChatBusy, messages, thread]);
+    return renderedMessages.length;
+  }, [isChatBusy, renderedMessages, thread]);
 
   const messageCountLabel = visibleMessageCount === 1 ? "message" : "messages";
 
@@ -636,6 +664,9 @@ export function ChatPanel({
   const canSend =
     Boolean(thread) && input.trim().length > 0 && !isLoading && !isChatBusy;
 
+  const shouldShowHistoryOverlay =
+    Boolean(thread) && Boolean(loadingMessage) && renderedMessages.length > 0;
+
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) {
@@ -644,6 +675,8 @@ export function ChatPanel({
     const nextInput = input.trim();
     isAtBottomRef.current = true;
     setInput("");
+    clearError();
+    onThreadTouchAction?.(threadId, { titleCandidate: nextInput });
     await sendMessage({ text: nextInput });
   };
 
@@ -675,48 +708,52 @@ export function ChatPanel({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="flex min-h-0 flex-1 flex-col rounded-3xl border border-border bg-surface p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
-          {messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-base font-medium text-foreground">
-                {mainMessage}
-              </p>
-              <p className="text-sm text-muted">{hint}</p>
-            </div>
-          ) : (
-            <div
-              ref={messageListRef}
-              role="log"
-              aria-label="Chat messages"
-              onScroll={updateIsAtBottom}
-              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2"
-            >
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`w-fit max-w-[92%] rounded-2xl border p-4 shadow-sm lg:max-w-[75%] ${
-                    message.role === "user"
-                      ? "ml-auto border-accent bg-accent-soft text-accent-ink"
-                      : "border-border bg-surface text-foreground"
-                  }`}
-                >
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
-                    {message.role}
-                  </div>
-                  <div className="space-y-3 text-sm leading-relaxed">
-                    {message.parts.map((part, index) => {
-                      if (isTextLikePart(part)) {
-                        return (
-                          <div
-                            key={`${message.id}-part-${index}`}
-                            className="space-y-3"
-                          >
-                            {renderMarkdownBlocks(part.text, `${message.id}-part-${index}`)}
-                          </div>
-                        );
-                      }
-                      if (isConfirmActionPart(part)) {
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="relative flex min-h-0 flex-1 flex-col rounded-3xl border border-border bg-surface p-6 shadow-[0_30px_70px_-55px_rgba(15,23,42,0.35)]">
+            {renderedMessages.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <p className="text-base font-medium text-foreground">
+                  {mainMessage}
+                </p>
+                <p className="text-sm text-muted">{hint}</p>
+              </div>
+            ) : (
+              <div
+                ref={messageListRef}
+                role="log"
+                aria-label="Chat messages"
+                onScroll={updateIsAtBottom}
+                className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 transition-opacity duration-[250ms] ease-in-out motion-safe:will-change-[opacity] ${
+                  isCrossfading ? "opacity-95" : "opacity-100"
+                }`}
+                aria-busy={shouldShowHistoryOverlay || undefined}
+              >
+                {renderedMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`w-fit max-w-[92%] rounded-2xl border p-4 shadow-sm lg:max-w-[75%] ${
+                      message.role === "user"
+                        ? "ml-auto border-accent bg-accent-soft text-accent-ink"
+                        : "border-border bg-surface text-foreground"
+                    }`}
+                  >
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+                      {message.role}
+                    </div>
+                    <div className="space-y-3 text-sm leading-relaxed">
+                      {message.parts.map((part, index) => {
+                        if (isTextLikePart(part)) {
+                          return (
+                            <div
+                              key={`${message.id}-part-${index}`}
+                              className="space-y-3"
+                            >
+                              {renderMarkdownBlocks(part.text, `${message.id}-part-${index}`)}
+                            </div>
+                          );
+                        }
+                        if (isConfirmActionPart(part)) {
+
                         const input = part.input as ConfirmActionInput | undefined;
                         const output =
                           "output" in part
@@ -1079,6 +1116,14 @@ export function ChatPanel({
               <div ref={messagesEndRef} />
             </div>
           )}
+
+          {shouldShowHistoryOverlay ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-3xl bg-background/35 backdrop-blur-[1px]">
+              <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted shadow-sm">
+                Loading messages...
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {!thread ? (
