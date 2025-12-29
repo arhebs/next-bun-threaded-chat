@@ -60,7 +60,7 @@ export const sendInvitesPayloadSchema = z.object({
   message: z.string().optional(),
 });
 
-function parseJsonish(value: unknown): unknown {
+function preprocessLooseJson(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;
   }
@@ -96,15 +96,15 @@ const confirmActionBaseInputSchema = z.object({
 export const confirmActionInputSchema = z.discriminatedUnion("action", [
   confirmActionBaseInputSchema.extend({
     action: z.literal("updateCell"),
-    actionPayload: z.preprocess(parseJsonish, updateCellPayloadInputSchema),
+     actionPayload: z.preprocess(preprocessLooseJson, updateCellPayloadInputSchema),
   }),
   confirmActionBaseInputSchema.extend({
     action: z.literal("deleteThread"),
-    actionPayload: z.preprocess(parseJsonish, deleteThreadPayloadSchema),
+     actionPayload: z.preprocess(preprocessLooseJson, deleteThreadPayloadSchema),
   }),
   confirmActionBaseInputSchema.extend({
     action: z.literal("sendInvites"),
-    actionPayload: z.preprocess(parseJsonish, sendInvitesPayloadSchema),
+     actionPayload: z.preprocess(preprocessLooseJson, sendInvitesPayloadSchema),
   }),
 ]);
 

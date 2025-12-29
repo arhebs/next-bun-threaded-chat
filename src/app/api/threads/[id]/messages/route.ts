@@ -86,19 +86,24 @@ function assertToolPartsAreValid(messages: unknown): void {
 
       const toolName = type.slice("tool-".length);
       const schemas = TOOL_PART_SCHEMAS[toolName];
-      if (!schemas) {
-        throw new Error(`Unknown tool part type: ${type}`);
-      }
+       if (!schemas) {
+         // Be tolerant of older/unrecognized tool parts stored in history.
+         continue;
+       }
 
-      if (!("input" in record)) {
-        throw new Error(`Tool part ${type} is missing input.`);
-      }
+       if ("input" in record) {
+         schemas.input.parse(record.input);
+       } else {
+         // Some UI tool parts only include output (or error) and omit the original input.
+         // We keep them for display, but skip strict input validation.
+         if (!("output" in record) && !("errorText" in record)) {
+           continue;
+         }
+       }
 
-      schemas.input.parse(record.input);
-
-      if ("output" in record) {
-        schemas.output.parse(record.output);
-      }
+       if ("output" in record) {
+         schemas.output.parse(record.output);
+       }
     }
   }
 }

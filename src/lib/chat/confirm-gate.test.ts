@@ -17,6 +17,22 @@ function messageWithConfirmOutput(output: unknown): UIMessage {
   };
 }
 
+function messageWithToolInvocation(output: unknown): UIMessage {
+  return {
+    id: "assistant-2",
+    role: "assistant",
+    parts: [
+      {
+        type: "tool-invocation",
+        toolInvocation: {
+          toolName: "confirmAction",
+          result: output,
+        },
+      } as any,
+    ],
+  };
+}
+
 describe("confirm-gate", () => {
   it("getContextMessages throws when context is missing", () => {
     expect(() => getContextMessages(undefined)).toThrow("Missing confirmation context");
@@ -41,6 +57,25 @@ describe("confirm-gate", () => {
         token: "token-1",
         action: "updateCell",
         expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      })
+    ).not.toThrow();
+  });
+
+  it("allows execution when output is a tool invocation", () => {
+    const messages: UIMessage[] = [
+      messageWithToolInvocation({
+        approved: true,
+        confirmationToken: "token-tool-invocation",
+        action: "deleteThread",
+        actionPayload: { threadId: "thread-1" },
+      }),
+    ];
+
+    expect(() =>
+      assertConfirmed(messages, {
+        token: "token-tool-invocation",
+        action: "deleteThread",
+        expectedPayload: { threadId: "thread-1" },
       })
     ).not.toThrow();
   });
