@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
 
@@ -6,12 +7,17 @@ const DEFAULT_WORKBOOK_PATH = "data/example.xlsx";
 
 let workbookPathOverride: string | null = null;
 
-export function __setWorkbookPathForTesting(path: string | null): void {
-  workbookPathOverride = path;
+export function __setWorkbookPathForTesting(workbookPath: string | null): void {
+  workbookPathOverride = workbookPath;
 }
 
 function resolveWorkbookPath(): { resolvedPath: string; configuredPath: string } {
-  const configuredPath = workbookPathOverride ?? DEFAULT_WORKBOOK_PATH;
+  const envPath = process.env.WORKBOOK_PATH?.trim();
+  const configuredPath =
+    workbookPathOverride ??
+    (envPath && envPath.length > 0 ? envPath : null) ??
+    DEFAULT_WORKBOOK_PATH;
+
   const resolvedPath = path.isAbsolute(configuredPath)
     ? configuredPath
     : path.resolve(process.cwd(), configuredPath);
@@ -60,9 +66,22 @@ export function saveWorkbook(workbook: XLSX.WorkBook): void {
     throw new Error("XLSX.write did not return a binary buffer.");
   }
 
+  const directory = path.dirname(resolvedPath);
+  const tempPath = path.join(
+    directory,
+    `.tmp-${path.basename(resolvedPath)}-${randomUUID()}`
+  );
+
   try {
-    writeFileSync(resolvedPath, data);
+    writeFileSync(tempPath, data);
+    renameSync(tempPath, resolvedPath);
   } catch (error) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to write workbook at ${configuredPath}: ${message}`);
   }

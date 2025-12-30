@@ -80,7 +80,9 @@ function main(): void {
   const outputPath = resolveOutputPath();
   writeFileSync(outputPath, buffer);
 
-  console.log(`Generated ${OUTPUT_RELATIVE_PATH} (${buffer.byteLength} bytes).`);
+  process.stdout.write(
+    `Generated ${OUTPUT_RELATIVE_PATH} (${buffer.byteLength} bytes).\n`
+  );
 }
 
 main();

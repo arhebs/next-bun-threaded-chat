@@ -1,6 +1,5 @@
 import * as XLSX from "xlsx";
 
-import { loadWorkbook } from "./workbook";
 import { parseA1Cell, toA1Cell } from "./range";
 
 export type CellValue = string | number | boolean | null;
@@ -122,9 +121,4 @@ export function updateCellInWorkbook(
     cell: normalizedCell,
     value: input.value,
   };
-}
-
-export function updateCell(input: UpdateCellInput): UpdateCellResult {
-  const workbook = loadWorkbook();
-  return updateCellInWorkbook(workbook, input);
 }
