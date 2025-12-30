@@ -12,6 +12,7 @@ export async function POST(): Promise<Response> {
 
   try {
     const db = getDb();
+    db.exec("DELETE FROM consumed_confirmations;");
     db.exec("DELETE FROM messages;");
     db.exec("DELETE FROM threads;");
 

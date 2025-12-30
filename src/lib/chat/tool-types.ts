@@ -41,10 +41,34 @@ export const cellValueSchema = z.union([
   z.null(),
 ]);
 
+function coerceNumericString(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+
+  if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(trimmed)) {
+    return value;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+
+  return parsed;
+}
+
+const updateCellValueSchema = z.preprocess(coerceNumericString, cellValueSchema);
+
 export const updateCellPayloadSchema = z.object({
   sheet: sheetNameSchema,
   cell: a1CellSchema,
-  value: cellValueSchema,
+  value: updateCellValueSchema,
 });
 
 const updateCellPayloadInputSchema = updateCellPayloadSchema.extend({
@@ -143,19 +167,25 @@ export const readRangeOutputSchema = z.object({
 export const updateCellInputSchema = z.object({
   sheet: sheetNameInputSchema,
   cell: a1CellSchema,
-  value: cellValueSchema,
-  confirmationToken: z.string().min(1),
+  value: updateCellValueSchema,
+  confirmationToken: z
+    .union([z.string(), z.null()])
+    .optional()
+    .describe("Optional and ignored. Confirmation is verified via tool context."),
 });
 
 export const updateCellOutputSchema = z.object({
   sheet: sheetNameSchema,
   cell: a1CellSchema,
-  value: cellValueSchema,
+  value: updateCellValueSchema,
 });
 
 export const deleteThreadInputSchema = z.object({
   threadId: z.string().min(1),
-  confirmationToken: z.string().min(1),
+  confirmationToken: z
+    .union([z.string(), z.null()])
+    .optional()
+    .describe("Optional and ignored. Confirmation is verified via tool context."),
 });
 
 export const deleteThreadOutputSchema = z.object({

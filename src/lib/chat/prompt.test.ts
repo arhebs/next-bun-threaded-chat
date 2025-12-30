@@ -7,5 +7,8 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("Confirmation policy (strict):");
     expect(SYSTEM_PROMPT).toContain("Never call dangerous tools");
     expect(SYSTEM_PROMPT).toContain("If denied: respond with 'Action canceled.'");
+    expect(SYSTEM_PROMPT).toContain(
+      "Do not include the confirmationToken in tool arguments. It is handled automatically."
+    );
   });
 });

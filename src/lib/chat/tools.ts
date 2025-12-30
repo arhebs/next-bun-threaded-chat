@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { tool, type Tool } from "ai";
 
 import { deleteThread as deleteThreadFromDb } from "@/lib/db/threads";
 import { normalizeA1Cell } from "@/lib/xlsx/range";
@@ -7,7 +7,7 @@ import { loadWorkbook, saveWorkbook } from "@/lib/xlsx/workbook";
 import { withWorkbookLock } from "@/lib/xlsx/workbook-lock";
 import { updateCellInWorkbook } from "@/lib/xlsx/write";
 
-import { assertConfirmed, getContextMessages } from "./confirm-gate";
+import { assertConfirmedAndConsume, getContextMessages } from "./confirm-gate";
 import {
   confirmActionInputSchema,
   confirmActionOutputSchema,
@@ -33,7 +33,8 @@ export const tools = {
     description: "Read a Sheet1 A1 range and return its values.",
     inputSchema: readRangeInputSchema,
     outputSchema: readRangeOutputSchema,
-    execute: async (input) => readRange({ sheet: input.sheet, range: input.range }),
+    execute: async (input) =>
+      withWorkbookLock(() => readRange({ sheet: input.sheet, range: input.range })),
   }),
   updateCell: tool({
     description: "Update a single cell in Sheet1 (requires confirmation).",
@@ -41,8 +42,7 @@ export const tools = {
     outputSchema: updateCellOutputSchema,
     execute: async (input, options) => {
       const messages = getContextMessages(options.experimental_context);
-      assertConfirmed(messages, {
-        token: input.confirmationToken,
+      assertConfirmedAndConsume(messages, {
         action: "updateCell",
         expectedPayload: {
           sheet: input.sheet,
@@ -77,8 +77,7 @@ export const tools = {
     outputSchema: deleteThreadOutputSchema,
     execute: async (input, options) => {
       const messages = getContextMessages(options.experimental_context);
-      assertConfirmed(messages, {
-        token: input.confirmationToken,
+      assertConfirmedAndConsume(messages, {
         action: "deleteThread",
         expectedPayload: {
           threadId: input.threadId,
@@ -106,26 +105,29 @@ export const tools = {
     description: "Explain the formula in a given Sheet1 cell.",
     inputSchema: explainFormulaInputSchema,
     outputSchema: explainFormulaOutputSchema,
-    execute: async (input) => {
-      const workbook = loadWorkbook();
-      const worksheet = workbook.Sheets[input.sheet];
-      if (!worksheet) {
-        throw new Error(`Workbook is missing required sheet ${input.sheet}.`);
-      }
+    execute: async (input) =>
+      withWorkbookLock(() => {
+        const workbook = loadWorkbook();
+        const worksheet = workbook.Sheets[input.sheet];
+        if (!worksheet) {
+          throw new Error(`Workbook is missing required sheet ${input.sheet}.`);
+        }
 
-      const normalizedCell = normalizeA1Cell(input.cell);
-      const cell = (worksheet as Record<string, unknown>)[normalizedCell] as
-        | { f?: unknown }
-        | undefined;
-      const formula = typeof cell?.f === "string" ? cell.f.trim() : "";
+        const normalizedCell = normalizeA1Cell(input.cell);
+        const cell = (worksheet as Record<string, unknown>)[normalizedCell] as
+          | { f?: unknown }
+          | undefined;
+        const formula = typeof cell?.f === "string" ? cell.f.trim() : "";
 
-      if (!formula) {
-        throw new Error(`No formula found in ${input.sheet}!${normalizedCell}.`);
-      }
+        if (!formula) {
+          throw new Error(`No formula found in ${input.sheet}!${normalizedCell}.`);
+        }
 
-      return {
-        formula: formula.startsWith("=") ? formula : `=${formula}`,
-      };
-    },
+        return {
+          formula: formula.startsWith("=") ? formula : `=${formula}`,
+        };
+      }),
   }),
 };
+
+export const toolsForAiSdk = tools as unknown as Record<string, Tool<unknown, unknown>>;

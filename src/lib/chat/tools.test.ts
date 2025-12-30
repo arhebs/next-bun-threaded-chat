@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "bun:test";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { UIMessage } from "ai";
+import * as XLSX from "xlsx";
 
 process.env.DB_PATH = ":memory:";
 
@@ -35,10 +36,25 @@ function withContext(messages: UIMessage[]) {
 }
 
 function createTempWorkbookCopy(): { workbookPath: string; cleanup: () => void } {
-  const source = resolve(process.cwd(), "data/example.xlsx");
   const dir = mkdtempSync(join(tmpdir(), "xlsx-tool-test-"));
   const workbookPath = join(dir, "example.xlsx");
-  copyFileSync(source, workbookPath);
+
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["ID", "Name", "Email", "Region", "SalesAmount", "Commission"],
+    [1, "Ava Chen", "ava.chen@example.com", "North", 12000, 1200],
+  ]);
+
+  sheet["F2"] = { t: "n", f: "E2*0.1", v: 1200 };
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as unknown;
+  if (!(buffer instanceof Uint8Array)) {
+    throw new Error("XLSX.write did not return a binary buffer.");
+  }
+
+  writeFileSync(workbookPath, buffer);
 
   return {
     workbookPath,
@@ -47,10 +63,24 @@ function createTempWorkbookCopy(): { workbookPath: string; cleanup: () => void }
 }
 
 describe("chat tools", () => {
+  let workbookCleanup: (() => void) | null = null;
+
   beforeEach(() => {
     const db = getDb();
+    db.exec("DELETE FROM consumed_confirmations;");
     db.exec("DELETE FROM messages;");
     db.exec("DELETE FROM threads;");
+
+    workbookCleanup?.();
+    const { workbookPath, cleanup } = createTempWorkbookCopy();
+    workbookCleanup = cleanup;
+    __setWorkbookPathForTesting(workbookPath);
+  });
+
+  afterEach(() => {
+    __setWorkbookPathForTesting(null);
+    workbookCleanup?.();
+    workbookCleanup = null;
   });
 
   it("sendInvites returns the same emails and message", async () => {
@@ -85,10 +115,7 @@ describe("chat tools", () => {
     ) => Promise<any>;
 
     await expect(
-      execute(
-        { sheet: "Sheet1", cell: "A1", value: 1, confirmationToken: "token" },
-        withContext([])
-      )
+      execute({ sheet: "Sheet1", cell: "A1", value: 1 }, withContext([]))
     ).rejects.toThrow("Missing confirmation");
   });
 
@@ -108,10 +135,7 @@ describe("chat tools", () => {
     ];
 
     await expect(
-      execute(
-        { sheet: "Sheet1", cell: "A1", value: 1, confirmationToken: "token" },
-        withContext(messages)
-      )
+      execute({ sheet: "Sheet1", cell: "A1", value: 1 }, withContext(messages))
     ).rejects.toThrow("Confirmation denied");
   });
 
@@ -138,23 +162,12 @@ describe("chat tools", () => {
       }),
     ];
 
-    const { workbookPath, cleanup } = createTempWorkbookCopy();
-    __setWorkbookPathForTesting(workbookPath);
+    const result = await updateExecute(payload, withContext(messages));
 
-    try {
-      const result = await updateExecute(
-        { ...payload, confirmationToken: "token" },
-        withContext(messages)
-      );
+    expect(result).toEqual(payload);
 
-      expect(result).toEqual(payload);
-
-      const readBack = await readExecute({ sheet: "Sheet1", range: "B2" });
-      expect(readBack.values).toEqual([[payload.value]]);
-    } finally {
-      __setWorkbookPathForTesting(null);
-      cleanup();
-    }
+    const readBack = await readExecute({ sheet: "Sheet1", range: "B2" });
+    expect(readBack.values).toEqual([[payload.value]]);
   });
 
   it("deleteThread requires a matching confirmation", async () => {
@@ -164,10 +177,7 @@ describe("chat tools", () => {
     ) => Promise<any>;
 
     await expect(
-      execute(
-        { threadId: "thread-1", confirmationToken: "token" },
-        withContext([])
-      )
+      execute({ threadId: "thread-1" }, withContext([]))
     ).rejects.toThrow("Missing confirmation");
   });
 
@@ -187,10 +197,7 @@ describe("chat tools", () => {
     ];
 
     await expect(
-      execute(
-        { threadId: "thread-1", confirmationToken: "token" },
-        withContext(messages)
-      )
+      execute({ threadId: "thread-1" }, withContext(messages))
     ).rejects.toThrow("Confirmation denied");
   });
 
@@ -211,10 +218,7 @@ describe("chat tools", () => {
       }),
     ];
 
-    const result = await execute(
-      { threadId: thread.id, confirmationToken: "token" },
-      withContext(messages)
-    );
+    const result = await execute({ threadId: thread.id }, withContext(messages));
 
     expect(result).toEqual({ threadId: thread.id, deleted: true });
     expect(getThread(thread.id)).toBeNull();

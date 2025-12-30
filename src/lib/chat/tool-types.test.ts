@@ -51,6 +51,32 @@ describe("tool-types", () => {
     expect(parsed.data.actionPayload.value).toBe(true);
   });
 
+  it("coerces numeric strings for updateCell values", () => {
+    const parsed = updateCellInputSchema.safeParse({
+      sheet: "Sheet1",
+      cell: "F3",
+      value: "850",
+      confirmationToken: "token",
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    expect(parsed.data.value).toBe(850);
+
+    const preservesLeadingZeros = updateCellInputSchema.safeParse({
+      sheet: "Sheet1",
+      cell: "F3",
+      value: "001",
+      confirmationToken: "token",
+    });
+
+    expect(preservesLeadingZeros.success).toBe(true);
+    if (!preservesLeadingZeros.success) return;
+
+    expect(preservesLeadingZeros.data.value).toBe("001");
+  });
+
   it("rejects non-Sheet1 sheets", () => {
     const parsed = updateCellInputSchema.safeParse({
       sheet: "Sheet2",
@@ -62,12 +88,12 @@ describe("tool-types", () => {
     expect(parsed.success).toBe(false);
   });
 
-  it("requires confirmationToken for deleteThread tool input", () => {
+  it("accepts deleteThread tool input without confirmationToken", () => {
     const parsed = deleteThreadInputSchema.safeParse({
       threadId: "thread",
     });
 
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
   });
 
   it("validates confirmAction output payload shape", () => {

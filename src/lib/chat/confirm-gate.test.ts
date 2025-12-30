@@ -1,7 +1,14 @@
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 
-import { assertConfirmed, getContextMessages } from "@/lib/chat/confirm-gate";
+import {
+  assertConfirmed,
+  assertConfirmedAndConsume,
+  getContextMessages,
+} from "@/lib/chat/confirm-gate";
+import { getDb } from "@/lib/db/client";
+
+process.env.DB_PATH = ":memory:";
 
 function messageWithConfirmOutput(output: unknown): UIMessage {
   return {
@@ -34,6 +41,11 @@ function messageWithToolInvocation(output: unknown): UIMessage {
 }
 
 describe("confirm-gate", () => {
+  beforeEach(() => {
+    const db = getDb();
+    db.exec("DELETE FROM consumed_confirmations;");
+  });
+
   it("getContextMessages throws when context is missing", () => {
     expect(() => getContextMessages(undefined)).toThrow("Missing confirmation context");
     expect(() => getContextMessages({})).toThrow("Missing confirmation context");
@@ -54,7 +66,6 @@ describe("confirm-gate", () => {
 
     expect(() =>
       assertConfirmed(messages, {
-        token: "token-1",
         action: "updateCell",
         expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
       })
@@ -73,7 +84,6 @@ describe("confirm-gate", () => {
 
     expect(() =>
       assertConfirmed(messages, {
-        token: "token-tool-invocation",
         action: "deleteThread",
         expectedPayload: { threadId: "thread-1" },
       })
@@ -92,14 +102,37 @@ describe("confirm-gate", () => {
 
     expect(() =>
       assertConfirmed(messages, {
-        token: "token-2",
         action: "deleteThread",
         expectedPayload: { threadId: "thread-1" },
       })
     ).toThrow("Confirmation denied");
   });
 
-  it("throws 'Missing confirmation' when no matching output exists", () => {
+  it("respects the latest confirmation for the same payload", () => {
+    const messages: UIMessage[] = [
+      messageWithConfirmOutput({
+        approved: true,
+        confirmationToken: "token-5",
+        action: "updateCell",
+        actionPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      }),
+      messageWithConfirmOutput({
+        approved: false,
+        confirmationToken: "token-6",
+        action: "updateCell",
+        actionPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      }),
+    ];
+
+    expect(() =>
+      assertConfirmed(messages, {
+        action: "updateCell",
+        expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      })
+    ).toThrow("Confirmation denied");
+  });
+
+  it("consumes confirmations after one successful use", () => {
     const messages: UIMessage[] = [
       messageWithConfirmOutput({
         approved: true,
@@ -110,8 +143,32 @@ describe("confirm-gate", () => {
     ];
 
     expect(() =>
+      assertConfirmedAndConsume(messages, {
+        action: "updateCell",
+        expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      })
+    ).not.toThrow();
+
+    expect(() =>
+      assertConfirmedAndConsume(messages, {
+        action: "updateCell",
+        expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
+      })
+    ).toThrow("Confirmation already used");
+  });
+
+  it("throws 'Missing confirmation' when no matching payload exists", () => {
+    const messages: UIMessage[] = [
+      messageWithConfirmOutput({
+        approved: true,
+        confirmationToken: "token-3",
+        action: "updateCell",
+        actionPayload: { sheet: "Sheet1", cell: "A2", value: 10 },
+      }),
+    ];
+
+    expect(() =>
       assertConfirmed(messages, {
-        token: "different-token",
         action: "updateCell",
         expectedPayload: { sheet: "Sheet1", cell: "A1", value: 10 },
       })
@@ -130,7 +187,6 @@ describe("confirm-gate", () => {
 
     expect(() =>
       assertConfirmed(messages, {
-        token: "token-4",
         action: "sendInvites",
         expectedPayload: { emails: ["b@example.com", "a@example.com"], message: "Hi" },
       })

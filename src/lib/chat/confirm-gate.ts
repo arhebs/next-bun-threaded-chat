@@ -2,12 +2,13 @@ import { isDeepStrictEqual } from "node:util";
 import type { UIMessage } from "ai";
 
 import {
-  confirmActionOutputSchema,
-  type ConfirmActionOutput,
-} from "./tool-types";
+  consumeConfirmationToken,
+  type ConsumableConfirmationAction,
+} from "@/lib/db/confirmations";
+
+import { confirmActionOutputSchema, type ConfirmActionOutput } from "./tool-types";
 
 type ConfirmCheck = {
-  token: string;
   action: ConfirmActionOutput["action"];
   expectedPayload: ConfirmActionOutput["actionPayload"];
 };
@@ -71,23 +72,14 @@ function collectConfirmOutputs(messages: UIMessage[]): ConfirmActionOutput[] {
   return outputs;
 }
 
-export function getContextMessages(context: unknown): UIMessage[] {
-  const ctx = context as { uiMessages?: unknown } | undefined;
-  if (!ctx || !Array.isArray(ctx.uiMessages)) {
-    throw new Error("Missing confirmation context");
-  }
-  return ctx.uiMessages as UIMessage[];
-}
-
-export function assertConfirmed(messages: UIMessage[], check: ConfirmCheck): void {
+function findLatestMatchingConfirmation(
+  messages: UIMessage[],
+  check: ConfirmCheck
+): ConfirmActionOutput | null {
   const outputs = collectConfirmOutputs(messages);
-  let deniedMatch = false;
+  let latestMatch: ConfirmActionOutput | null = null;
 
   for (const output of outputs) {
-    if (output.confirmationToken !== check.token) {
-      continue;
-    }
-
     if (output.action !== check.action) {
       continue;
     }
@@ -96,16 +88,53 @@ export function assertConfirmed(messages: UIMessage[], check: ConfirmCheck): voi
       continue;
     }
 
-    if (output.approved) {
-      return;
-    }
-
-    deniedMatch = true;
+    latestMatch = output;
   }
 
-  if (deniedMatch) {
+  return latestMatch;
+}
+
+export function getContextMessages(context: unknown): UIMessage[] {
+  const ctx = context as { uiMessages?: unknown } | undefined;
+  if (!ctx || !Array.isArray(ctx.uiMessages)) {
+    throw new Error("Missing confirmation context");
+  }
+  return ctx.uiMessages as UIMessage[];
+}
+
+export function assertConfirmed(
+  messages: UIMessage[],
+  check: ConfirmCheck
+): ConfirmActionOutput {
+  const latestMatch = findLatestMatchingConfirmation(messages, check);
+
+  if (!latestMatch) {
+    throw new Error("Missing confirmation");
+  }
+
+  if (!latestMatch.approved) {
     throw new Error("Confirmation denied");
   }
 
-  throw new Error("Missing confirmation");
+  return latestMatch;
+}
+
+type ConsumableConfirmCheck = Omit<ConfirmCheck, "action"> & {
+  action: ConsumableConfirmationAction;
+};
+
+export function assertConfirmedAndConsume(
+  messages: UIMessage[],
+  check: ConsumableConfirmCheck
+): void {
+  const confirmation = assertConfirmed(messages, check);
+  const didConsume = consumeConfirmationToken({
+    confirmationToken: confirmation.confirmationToken,
+    action: check.action,
+    actionPayload: confirmation.actionPayload,
+  });
+
+  if (!didConsume) {
+    throw new Error("Confirmation already used");
+  }
 }
