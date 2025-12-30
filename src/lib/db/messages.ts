@@ -1,17 +1,15 @@
 import type { UIMessage } from "ai";
+import { asc, eq } from "drizzle-orm";
 
 import { extractContentText, extractToolInvocations } from "../chat/message-extract";
-import { getDb } from "./client";
-import type { MessageRow } from "./types";
-
-const MESSAGE_COLUMNS =
-  "id, thread_id, role, content_text, tool_invocations_json, ui_message_json, created_at";
+import { getDrizzleDb } from "./client";
+import { messages as messagesTable, type MessageRow } from "./tables";
 
 type MessageMetadata = {
   createdAt?: unknown;
 };
 
-type ExistingMessageRow = Pick<MessageRow, "thread_id" | "created_at">;
+type ExistingMessageRow = Pick<MessageRow, "threadId" | "createdAt">;
 
 function resolveCreatedAt(message: UIMessage, fallbackCreatedAt: number): number {
   const metadata = message.metadata as MessageMetadata | undefined;
@@ -38,22 +36,22 @@ function withCreatedAtMetadata(message: UIMessage, createdAt: number): UIMessage
 }
 
 function parseMessageRow(row: MessageRow): UIMessage {
-  if (row.ui_message_json) {
+  if (row.uiMessageJson) {
     try {
-      const parsed = JSON.parse(row.ui_message_json) as UIMessage;
-      return withCreatedAtMetadata(parsed, row.created_at);
+      const parsed = JSON.parse(row.uiMessageJson) as UIMessage;
+      return withCreatedAtMetadata(parsed, row.createdAt);
     } catch {
       // fall through to reconstruction
     }
   }
 
   const parts: UIMessage["parts"] = [];
-  if (row.content_text) {
-    parts.push({ type: "text", text: row.content_text });
+  if (row.contentText) {
+    parts.push({ type: "text", text: row.contentText });
   }
-  if (row.tool_invocations_json) {
+  if (row.toolInvocationsJson) {
     try {
-      const toolParts = JSON.parse(row.tool_invocations_json);
+      const toolParts = JSON.parse(row.toolInvocationsJson);
       if (Array.isArray(toolParts)) {
         for (const part of toolParts) {
           parts.push(part as UIMessage["parts"][number]);
@@ -70,39 +68,35 @@ function parseMessageRow(row: MessageRow): UIMessage {
       role: row.role,
       parts,
     },
-    row.created_at
+    row.createdAt
   );
 }
 
 export function upsertMessages(threadId: string, messages: UIMessage[]): void {
-  const db = getDb();
+  const db = getDrizzleDb();
+  const baseNow = Date.now();
 
-  db.exec("BEGIN;");
-
-  let committed = false;
-  try {
-    const selectExisting = db.query<ExistingMessageRow>(
-      "SELECT thread_id, created_at FROM messages WHERE id = ?"
-    );
-
-    const upsert = db.query(
-      "INSERT INTO messages (id, thread_id, role, content_text, tool_invocations_json, ui_message_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET role = excluded.role, content_text = excluded.content_text, tool_invocations_json = excluded.tool_invocations_json, ui_message_json = excluded.ui_message_json"
-    );
-
-    const baseNow = Date.now();
-
+  db.transaction((tx) => {
     for (let index = 0; index < messages.length; index++) {
       const message = messages[index];
-      const existing = selectExisting.get(message.id);
 
-      if (existing && existing.thread_id !== threadId) {
+      const existing: ExistingMessageRow | undefined = tx
+        .select({
+          threadId: messagesTable.threadId,
+          createdAt: messagesTable.createdAt,
+        })
+        .from(messagesTable)
+        .where(eq(messagesTable.id, message.id))
+        .get();
+
+      if (existing && existing.threadId !== threadId) {
         throw new Error(
-          `Message ${message.id} belongs to thread ${existing.thread_id}, not ${threadId}`
+          `Message ${message.id} belongs to thread ${existing.threadId}, not ${threadId}`
         );
       }
 
       const createdAt = existing
-        ? existing.created_at
+        ? existing.createdAt
         : resolveCreatedAt(message, baseNow + index);
 
       const persistedMessage = withCreatedAtMetadata(message, createdAt);
@@ -111,37 +105,38 @@ export function upsertMessages(threadId: string, messages: UIMessage[]): void {
       const toolJson = toolParts.length > 0 ? JSON.stringify(toolParts) : null;
       const uiJson = JSON.stringify(persistedMessage);
 
-      upsert.run(
-        persistedMessage.id,
-        threadId,
-        persistedMessage.role,
-        contentText,
-        toolJson,
-        uiJson,
-        createdAt
-      );
+      tx.insert(messagesTable)
+        .values({
+          id: persistedMessage.id,
+          threadId,
+          role: persistedMessage.role,
+          contentText,
+          toolInvocationsJson: toolJson,
+          uiMessageJson: uiJson,
+          createdAt,
+        })
+        .onConflictDoUpdate({
+          target: messagesTable.id,
+          set: {
+            role: persistedMessage.role,
+            contentText,
+            toolInvocationsJson: toolJson,
+            uiMessageJson: uiJson,
+          },
+        })
+        .run();
     }
-
-    db.exec("COMMIT;");
-    committed = true;
-  } finally {
-    if (!committed) {
-      try {
-        db.exec("ROLLBACK;");
-      } catch {
-        // ignore rollback errors
-      }
-    }
-  }
+  });
 }
 
 export function loadUIMessages(threadId: string): UIMessage[] {
-  const db = getDb();
+  const db = getDrizzleDb();
   const rows = db
-    .query<MessageRow>(
-      `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE thread_id = ? ORDER BY created_at ASC, id ASC`
-    )
-    .all(threadId);
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.threadId, threadId))
+    .orderBy(asc(messagesTable.createdAt), asc(messagesTable.id))
+    .all();
 
   return rows.map(parseMessageRow);
 }

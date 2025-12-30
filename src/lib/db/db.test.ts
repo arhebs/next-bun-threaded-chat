@@ -16,6 +16,7 @@ import { loadUIMessages, upsertMessages } from "@/lib/db/messages";
 
 function resetDatabase(): void {
   const db = getDb();
+  db.exec("DELETE FROM consumed_confirmations;");
   db.exec("DELETE FROM messages;");
   db.exec("DELETE FROM threads;");
 }

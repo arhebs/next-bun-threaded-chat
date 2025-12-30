@@ -1,13 +1,19 @@
-import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { initSchema } from "./schema";
+import { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+
+import * as schema from "./tables";
 
 const DEFAULT_DB_PATH = "data/app.sqlite";
 
+type DrizzleDb = BunSQLiteDatabase<typeof schema>;
+
 type GlobalWithDb = typeof globalThis & {
   __appDb?: Database;
+  __drizzleDb?: DrizzleDb;
 };
 
 function resolveDbPath(): string {
@@ -30,8 +36,20 @@ export function getDb(): Database {
     const db = new Database(dbFile);
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA foreign_keys = ON;");
-    initSchema(db);
+
+    const drizzleDb = drizzle(db, { schema });
+    migrate(drizzleDb, { migrationsFolder: "drizzle" });
+
     globalForDb.__appDb = db;
+    globalForDb.__drizzleDb = drizzleDb;
   }
   return globalForDb.__appDb;
+}
+
+export function getDrizzleDb(): DrizzleDb {
+  const globalForDb = globalThis as GlobalWithDb;
+  if (!globalForDb.__drizzleDb) {
+    globalForDb.__drizzleDb = drizzle(getDb(), { schema });
+  }
+  return globalForDb.__drizzleDb;
 }
