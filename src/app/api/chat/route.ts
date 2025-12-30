@@ -5,7 +5,7 @@ import {
   streamText,
   validateUIMessages,
 } from "ai";
-import type { Tool, UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -13,7 +13,8 @@ import { handleMockChat } from "@/lib/chat/mock-handler";
 import { SYSTEM_PROMPT } from "@/lib/chat/prompt";
 import { saveChatHistory } from "@/lib/chat/persistence";
 import { normalizeToolParts } from "@/lib/chat/tool-part-normalize";
-import { tools } from "@/lib/chat/tools";
+import { sanitizeUIMessagesForValidation } from "@/lib/chat/ui-message-sanitize";
+import { toolsForAiSdk } from "@/lib/chat/tools";
 import { env } from "@/lib/env";
 import { parseMentions } from "@/lib/xlsx/mentions";
 
@@ -121,94 +122,32 @@ function buildMentionContext(uiMessages: UIMessage[]): string | null {
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const json: unknown = await request.json();
+    const json: unknown = await request.json().catch(() => undefined);
+    if (json === undefined) {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+
     const parsedBody = chatSchema.safeParse(json);
 
     if (!parsedBody.success) {
-      const messages = new Set(parsedBody.error.issues.map((issue) => issue.message));
-      if (messages.has("Missing thread id")) {
+      const issueMessages = parsedBody.error.issues.map((issue) => issue.message);
+      if (issueMessages.includes("Missing thread id")) {
         return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
       }
-      if (messages.has("Missing messages")) {
+      if (issueMessages.includes("Missing messages")) {
         return NextResponse.json({ error: "Missing messages" }, { status: 400 });
       }
-      return NextResponse.json({ error: parsedBody.error.flatten() }, { status: 400 });
+
+      return NextResponse.json(
+        { error: "Invalid request", details: parsedBody.error.flatten() },
+        { status: 400 }
+      );
     }
 
     const { id: threadId, messages: rawMessages } = parsedBody.data;
-    const toolSet = tools as unknown as Record<string, Tool<unknown, unknown>>;
+    const toolSet = toolsForAiSdk;
 
-    // `useChat` can temporarily include an in-flight assistant message with `parts: []`.
-    // The server validator requires every message to contain at least one part.
-    const incomingMessages = rawMessages.filter((message) => {
-      if (message && typeof message === "object" && "parts" in message) {
-        const parts = (message as { parts?: unknown }).parts;
-        if (Array.isArray(parts) && parts.length === 0) {
-          return false;
-        }
-      }
-      return true;
-    });
-
-    const sanitizedIncomingMessages = incomingMessages
-      .map((message) => {
-        if (!message || typeof message !== "object" || !("parts" in message)) {
-          return message;
-        }
-
-        const parts = (message as { parts?: unknown }).parts;
-        if (!Array.isArray(parts)) {
-          return message;
-        }
-
-        const cleanedParts = parts.filter((part) => {
-          if (!part || typeof part !== "object") {
-            return true;
-          }
-
-          const record = part as Record<string, unknown>;
-          const type = record.type;
-          const toolCallId = record.toolCallId;
-
-          const isToolPart =
-            type === "dynamic-tool" ||
-            (typeof type === "string" && type.startsWith("tool-"));
-
-          if (!isToolPart) {
-            return true;
-          }
-
-          if (typeof toolCallId !== "string" || toolCallId.trim().length === 0) {
-            return false;
-          }
-
-          const state = record.state;
-          const stateText = typeof state === "string" ? state : "";
-          const needsInput = stateText.startsWith("input");
-
-          if (needsInput && !("input" in record)) {
-            return false;
-          }
-
-          if (needsInput && record.input == null) {
-            return false;
-          }
-
-          return true;
-        });
-
-        return {
-          ...(message as Record<string, unknown>),
-          parts: cleanedParts,
-        };
-      })
-      .filter((message) => {
-        if (!message || typeof message !== "object" || !("parts" in message)) {
-          return true;
-        }
-        const parts = (message as { parts?: unknown }).parts;
-        return !Array.isArray(parts) || parts.length > 0;
-      });
+    const sanitizedIncomingMessages = sanitizeUIMessagesForValidation(rawMessages);
 
     const validated = await validateUIMessages({
       messages: sanitizedIncomingMessages,

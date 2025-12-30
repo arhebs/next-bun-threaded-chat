@@ -1,5 +1,6 @@
-import { validateUIMessages, type Tool } from "ai";
+import { validateUIMessages } from "ai";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import {
   confirmActionInputSchema,
@@ -15,11 +16,15 @@ import {
   updateCellInputSchema,
   updateCellOutputSchema,
 } from "@/lib/chat/tool-types";
-import { tools } from "@/lib/chat/tools";
+import { toolsForAiSdk } from "@/lib/chat/tools";
 import { loadUIMessages } from "@/lib/db/messages";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const routeParamsSchema = z.object({
+  id: z.string().trim().min(1, "Missing thread id"),
+});
 
 type RouteContext = {
   params: Promise<{
@@ -113,18 +118,19 @@ export async function GET(
   context: RouteContext
 ): Promise<Response> {
   try {
-    const params = await context.params;
-    const threadId = params.id.trim();
-    if (!threadId) {
+    const parsedParams = routeParamsSchema.safeParse(await context.params);
+    if (!parsedParams.success) {
       return NextResponse.json({ error: "Missing thread id" }, { status: 400 });
     }
+
+    const threadId = parsedParams.data.id;
 
     const messages = loadUIMessages(threadId);
     if (messages.length === 0) {
       return NextResponse.json({ messages: [] }, { status: 200 });
     }
 
-    const toolSet = tools as unknown as Record<string, Tool<unknown, unknown>>;
+    const toolSet = toolsForAiSdk;
 
     const validated = await validateUIMessages({
       messages,

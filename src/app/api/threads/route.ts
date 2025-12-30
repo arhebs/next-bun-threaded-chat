@@ -18,9 +18,8 @@ export async function GET(): Promise<Response> {
   }
 }
 
-export async function POST(request: Request): Promise<Response> {
-  request.headers.get("content-type");
-
+export async function POST(_request: Request): Promise<Response> {
+  void _request;
   try {
     const thread = createThread();
     return NextResponse.json({ thread }, { status: 201 });
