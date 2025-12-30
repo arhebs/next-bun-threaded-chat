@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { unstable_batchedUpdates } from "react-dom";
 
+import { cn } from "@/lib/cn";
 import {
   createThread,
   listThreads,
@@ -80,7 +81,10 @@ export function ThreadSidebar({
   const [error, setError] = useState<string | null>(null);
 
   const threadsRef = useRef(threads);
-  threadsRef.current = threads;
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
 
   const isInitialLoading = isLoading && threads.length === 0;
 
@@ -156,7 +160,10 @@ export function ThreadSidebar({
 
   return (
     <aside
-      className={`relative flex h-full min-h-0 w-full flex-col gap-6 border-b border-border bg-surface p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out] ${className ?? ""}`}
+      className={cn(
+        "relative flex h-full min-h-0 w-full flex-col gap-6 border-b border-border bg-surface p-6 shadow-[0_30px_70px_-60px_rgba(15,23,42,0.35)] lg:w-80 lg:border-b-0 lg:border-r motion-safe:animate-[rise_0.6s_ease-out]",
+        className
+      )}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -232,11 +239,12 @@ export function ThreadSidebar({
                     onSelectAction(thread.id);
                     onCloseAction?.();
                   }}
-                  className={`w-full rounded-xl border px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                  className={cn(
+                    "w-full rounded-xl border px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     isSelected
                       ? "border-accent bg-accent-soft text-accent-ink"
                       : "border-border bg-surface text-foreground hover:bg-surface-muted"
-                  }`}
+                  )}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold">

@@ -87,7 +87,11 @@ export default function Home() {
     {}
   );
   const messagesByThreadIdRef = useRef(messagesByThreadId);
-  messagesByThreadIdRef.current = messagesByThreadId;
+
+  useEffect(() => {
+    messagesByThreadIdRef.current = messagesByThreadId;
+  }, [messagesByThreadId]);
+
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);

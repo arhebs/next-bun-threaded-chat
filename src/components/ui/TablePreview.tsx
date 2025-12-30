@@ -1,3 +1,5 @@
+import { cn } from "@/lib/cn";
+
 type CellValue = string | number | boolean | null;
 
 type TablePreviewProps = {
@@ -43,13 +45,6 @@ export function TablePreview({
   const clippedRows = totalRows > maxRows;
   const clippedCols = totalCols > maxCols;
 
-  const containerClass = selected
-    ? "border-accent bg-accent-soft/20"
-    : "border-border bg-surface-muted";
-
-  const interactiveClass = onClick
-    ? "cursor-pointer transition hover:border-accent hover:bg-accent-soft/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    : "";
 
   return (
     <div
@@ -65,7 +60,12 @@ export function TablePreview({
           onClick();
         }
       }}
-      className={`rounded-2xl border p-3 ${containerClass} ${interactiveClass}`}
+      className={cn(
+        "rounded-2xl border p-3",
+        selected ? "border-accent bg-accent-soft/20" : "border-border bg-surface-muted",
+        onClick &&
+          "cursor-pointer transition hover:border-accent hover:bg-accent-soft/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      )}
     >
       <table
         className="w-full table-fixed border-collapse text-left text-xs"

@@ -1,3 +1,5 @@
+import { cn } from "@/lib/cn";
+
 type ConfirmationStatus = "pending" | "approved" | "denied" | "error";
 
 type ConfirmationCardProps = {
@@ -68,7 +70,10 @@ export function ConfirmationCard({
           ) : null}
         </div>
         <span
-          className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${statusClass}`}
+          className={cn(
+            "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]",
+            statusClass
+          )}
         >
           {statusLabel}
         </span>

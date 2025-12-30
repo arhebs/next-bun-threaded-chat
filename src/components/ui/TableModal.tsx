@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { cn } from "@/lib/cn";
 import { Modal } from "@/components/ui/Modal";
 import { formatCellValue } from "@/components/ui/TablePreview";
 import type { ReadRangeOutput } from "@/lib/chat/tool-types";
@@ -99,9 +100,10 @@ export function TableModal({
           Selection
         </p>
         <p
-          className={`mt-1 font-mono text-sm ${
+          className={cn(
+            "mt-1 font-mono text-sm",
             mention ? "text-foreground" : "text-muted"
-          }`}
+          )}
         >
           {mention ?? "Drag to select cells"}
         </p>
@@ -218,9 +220,10 @@ export function TableModal({
                             setIsDragging(false);
                             setSelectionEnd({ rowIndex, colIndex });
                           }}
-                          className={`max-w-64 border-r border-border px-3 py-2 align-top text-sm text-foreground last:border-0 cursor-crosshair ${
-                            isSelected ? "bg-accent-soft/50" : ""
-                          }`}
+                          className={cn(
+                            "max-w-64 border-r border-border px-3 py-2 align-top text-sm text-foreground last:border-0 cursor-crosshair",
+                            isSelected && "bg-accent-soft/50"
+                          )}
                         >
                           <div className="truncate" title={formatted}>
                             {formatted}

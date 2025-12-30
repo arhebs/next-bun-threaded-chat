@@ -13,12 +13,15 @@ import { TableModal } from "@/components/ui/TableModal";
 import { TablePreview, formatCellValue } from "@/components/ui/TablePreview";
 import { ToolJsonView } from "@/components/ui/ToolJsonView";
 import type { Thread } from "@/lib/client/api";
-import type {
-  ConfirmActionInput,
-  ConfirmActionOutput,
-  DeleteThreadOutput,
-  ReadRangeOutput,
-  UpdateCellOutput,
+import { cn } from "@/lib/cn";
+import {
+  confirmActionOutputSchema,
+  deleteThreadOutputSchema,
+  readRangeOutputSchema,
+  updateCellOutputSchema,
+  type ConfirmActionInput,
+  type ConfirmActionOutput,
+  type ReadRangeOutput,
 } from "@/lib/chat/tool-types";
 
 type ChatPanelProps = {
@@ -185,6 +188,7 @@ const MARKDOWN_COMPONENTS: Components = {
     );
   },
   code: ({ node: _node, className, children, ...props }) => {
+    void _node;
     const raw = Array.isArray(children) ? children.join("") : String(children ?? "");
     const content = raw.replace(/\n$/, "");
 
@@ -193,7 +197,7 @@ const MARKDOWN_COMPONENTS: Components = {
 
     if (preserveClassName) {
       return (
-        <code {...props} className={`not-prose ${className}`}>
+        <code {...props} className={cn("not-prose", className)}>
           {content}
         </code>
       );
@@ -210,7 +214,7 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-function renderMarkdownBlocks(text: string, _keyPrefix: string): ReactNode {
+function renderMarkdownBlocks(text: string): ReactNode {
   return (
     <div className="space-y-3 prose prose-sm prose-neutral dark:prose-invert max-w-none break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={MARKDOWN_COMPONENTS}>
@@ -236,58 +240,6 @@ function getToolNameFromPart(part: ChatPart): string | null {
   return null;
 }
 
-function isReadRangeOutput(output: unknown): output is ReadRangeOutput {
-  if (!output || typeof output !== "object") {
-    return false;
-  }
-
-  const record = output as Record<string, unknown>;
-  if (record.sheet !== "Sheet1") {
-    return false;
-  }
-
-  if (typeof record.range !== "string") {
-    return false;
-  }
-
-  if (!Array.isArray(record.values)) {
-    return false;
-  }
-
-  return (record.values as unknown[]).every(Array.isArray);
-}
-
-function isUpdateCellOutput(output: unknown): output is UpdateCellOutput {
-  if (!output || typeof output !== "object") {
-    return false;
-  }
-
-  const record = output as Record<string, unknown>;
-  if (record.sheet !== "Sheet1") {
-    return false;
-  }
-
-  if (typeof record.cell !== "string") {
-    return false;
-  }
-
-  const value = record.value;
-  return (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  );
-}
-
-function isDeleteThreadOutput(output: unknown): output is DeleteThreadOutput {
-  if (!output || typeof output !== "object") {
-    return false;
-  }
-
-  const record = output as Record<string, unknown>;
-  return typeof record.threadId === "string" && typeof record.deleted === "boolean";
-}
 
 function formatConfirmAction(action: ConfirmActionInput["action"]): string {
   switch (action) {
@@ -306,13 +258,20 @@ function resolveConfirmStatus(part: ConfirmActionPart): ConfirmStatus {
   if (part.state === "output-error") {
     return "error";
   }
-  if ("output" in part && part.output) {
-    const output = part.output as ConfirmActionOutput;
-    return output.approved ? "approved" : "denied";
-  }
+
   if (part.state === "output-denied") {
     return "denied";
   }
+
+  if ("output" in part && part.output != null) {
+    const parsed = confirmActionOutputSchema.safeParse(part.output);
+    if (parsed.success) {
+      return parsed.data.approved ? "approved" : "denied";
+    }
+
+    return "error";
+  }
+
   return "pending";
 }
 
@@ -360,23 +319,13 @@ export function ChatPanel({
 
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
 
-  const chatsByThreadIdRef = useRef(new Map<string, Chat<UIMessage>>());
-
   const chat = useMemo(() => {
-    const existing = chatsByThreadIdRef.current.get(threadId);
-    if (existing) {
-      return existing;
-    }
-
-    const created = new Chat<UIMessage>({
+    return new Chat<UIMessage>({
       id: threadId,
       messages: [],
       transport,
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     });
-
-    chatsByThreadIdRef.current.set(threadId, created);
-    return created;
   }, [threadId, transport]);
 
   const {
@@ -400,13 +349,20 @@ export function ChatPanel({
       return;
     }
 
-    setIsCrossfading(true);
-    const timeout = setTimeout(() => {
-      setIsCrossfading(false);
-    }, 250);
+    let hideTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const showTimeout = setTimeout(() => {
+      setIsCrossfading(true);
+      hideTimeout = setTimeout(() => {
+        setIsCrossfading(false);
+      }, 250);
+    }, 0);
 
     return () => {
-      clearTimeout(timeout);
+      clearTimeout(showTimeout);
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+      }
     };
   }, [threadId]);
 
@@ -422,12 +378,24 @@ export function ChatPanel({
     setMessages(initialMessages);
   }, [chat, initialMessages, setMessages]);
 
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    setMessages(initialMessages);
+  }, [initialMessages, isLoading, setMessages]);
+
   const [showHistoryLoadingIndicator, setShowHistoryLoadingIndicator] = useState(false);
   const historyLoadingShownAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setShowHistoryLoadingIndicator(false);
+    const timeout = setTimeout(() => {
+      setShowHistoryLoadingIndicator(false);
+    }, 0);
+
     historyLoadingShownAtRef.current = null;
+    return () => clearTimeout(timeout);
   }, [threadId]);
 
   useEffect(() => {
@@ -452,9 +420,12 @@ export function ChatPanel({
     const remaining = minVisibleMs - elapsed;
 
     if (remaining <= 0) {
-      setShowHistoryLoadingIndicator(false);
-      historyLoadingShownAtRef.current = null;
-      return;
+      const timeout = setTimeout(() => {
+        setShowHistoryLoadingIndicator(false);
+        historyLoadingShownAtRef.current = null;
+      }, 0);
+
+      return () => clearTimeout(timeout);
     }
 
     const timeout = setTimeout(() => {
@@ -677,25 +648,28 @@ export function ChatPanel({
       }
 
       if (output != null) {
-        const parsed = isReadRangeOutput(output) ? (output as ReadRangeOutput) : null;
-        const rangeLabel = parsed ? `${parsed.sheet}!${parsed.range}` : "Sheet1 (unknown range)";
+        const parsed = readRangeOutputSchema.safeParse(output);
+        const parsedOutput = parsed.success ? parsed.data : null;
+        const rangeLabel = parsedOutput
+          ? `${parsedOutput.sheet}!${parsedOutput.range}`
+          : "Sheet1 (unknown range)";
 
         return (
           <div key={key} className="space-y-3">
-            {parsed ? (
+            {parsedOutput ? (
               <>
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
                   Range <span className="font-mono text-foreground">{rangeLabel}</span>
                 </div>
                 <TablePreview
-                  values={parsed.values}
+                  values={parsedOutput.values}
                   selected={selectedReadRangeToolCallId === part.toolCallId}
                   onClick={() => {
                     setReadRangeUiByThreadId((current) => ({
                       ...current,
                       [threadId]: {
                         selectedToolCallId: part.toolCallId,
-                        modalOutput: parsed,
+                        modalOutput: parsedOutput,
                       },
                     }));
                   }}
@@ -769,9 +743,10 @@ export function ChatPanel({
     }
 
     if (output != null) {
-      const parsed = isUpdateCellOutput(output) ? (output as UpdateCellOutput) : null;
-      const target = parsed
-        ? `${parsed.sheet}!${parsed.cell}`
+      const parsed = updateCellOutputSchema.safeParse(output);
+      const parsedOutput = parsed.success ? parsed.data : null;
+      const target = parsedOutput
+        ? `${parsedOutput.sheet}!${parsedOutput.cell}`
         : cellLabel
           ? `${sheetLabel}!${cellLabel}`
           : "Sheet1 (unknown cell)";
@@ -783,9 +758,9 @@ export function ChatPanel({
             <div className="mt-2">
               Target: <span className="font-mono text-foreground">{target}</span>
             </div>
-            {parsed ? (
+            {parsedOutput ? (
               <div className="mt-1">
-                Value: <span className="font-mono text-foreground">{formatCellValue(parsed.value)}</span>
+                Value: <span className="font-mono text-foreground">{formatCellValue(parsedOutput.value)}</span>
               </div>
             ) : null}
           </div>
@@ -834,17 +809,18 @@ export function ChatPanel({
       }
 
       if (output != null) {
-        const parsed = isDeleteThreadOutput(output) ? (output as DeleteThreadOutput) : null;
-        const deleted = parsed?.deleted ?? false;
+        const parsed = deleteThreadOutputSchema.safeParse(output);
+        const parsedOutput = parsed.success ? parsed.data : null;
+        const deleted = parsedOutput?.deleted ?? false;
 
         return (
           <div key={key} className="space-y-3">
             <div className="rounded-2xl border border-dashed border-border bg-surface-muted p-3 text-xs text-muted">
               <div className="font-semibold uppercase tracking-[0.2em]">Thread deletion</div>
-              {parsed ? (
+              {parsedOutput ? (
                 <div className="mt-2 space-y-1">
                   <div>
-                    Thread: <span className="font-mono text-foreground">{parsed.threadId}</span>
+                    Thread: <span className="font-mono text-foreground">{parsedOutput.threadId}</span>
                   </div>
                   <div>
                     Result:{" "}
@@ -1122,19 +1098,23 @@ export function ChatPanel({
                 role="log"
                 aria-label="Chat messages"
                 onScroll={handleMessageScroll}
-                className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 transition-opacity duration-[250ms] ease-in-out motion-safe:will-change-[opacity] ${
-                  isCrossfading ? "opacity-95" : "opacity-100"
-                }`}
+                 className={cn(
+                   "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-2 transition-opacity duration-[250ms] ease-in-out motion-safe:will-change-[opacity]",
+                   isCrossfading ? "opacity-95" : "opacity-100"
+                 )}
+
                 aria-busy={shouldShowHistoryOverlay || undefined}
               >
                 {renderedMessages.map((message) => (
                   <div
                     key={message.id}
-                    className={`w-fit max-w-[92%] rounded-2xl border p-4 shadow-sm lg:max-w-[75%] ${
-                      message.role === "user"
-                        ? "ml-auto border-accent bg-accent-soft text-accent-ink"
-                        : "border-border bg-surface text-foreground"
-                    }`}
+                     className={cn(
+                       "w-fit max-w-[92%] rounded-2xl border p-4 shadow-sm lg:max-w-[75%]",
+                       message.role === "user"
+                         ? "ml-auto border-accent bg-accent-soft text-accent-ink"
+                         : "border-border bg-surface text-foreground"
+                     )}
+
                   >
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                       {message.role}
@@ -1147,7 +1127,7 @@ export function ChatPanel({
                               key={`${message.id}-part-${index}`}
                               className="space-y-3"
                             >
-                              {renderMarkdownBlocks(part.text, `${message.id}-part-${index}`)}
+                              {renderMarkdownBlocks(part.text)}
                             </div>
                           );
                         }
