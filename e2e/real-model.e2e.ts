@@ -67,7 +67,11 @@ test.describe("1. Thread Management", () => {
 
     await page.reload();
     await expect(page.getByRole("button", { name: /Persist me/ })).toBeVisible();
-    await expect(page.getByRole("log", { name: "Chat messages" }).getByText("Persist me")).toBeVisible();
+    await expect(
+      page
+        .getByRole("log", { name: "Chat messages" })
+        .getByText("Persist me", { exact: true })
+    ).toBeVisible();
   });
 
   test("1.7 Empty state", async ({ page }) => {
