@@ -35,6 +35,15 @@ function withCreatedAtMetadata(message: UIMessage, createdAt: number): UIMessage
   return message;
 }
 
+function isValidMessagePart(value: unknown): value is UIMessage["parts"][number] {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof (value as { type: unknown }).type === "string"
+  );
+}
+
 function parseMessageRow(row: MessageRow): UIMessage {
   if (row.uiMessageJson) {
     try {
@@ -54,7 +63,9 @@ function parseMessageRow(row: MessageRow): UIMessage {
       const toolParts = JSON.parse(row.toolInvocationsJson);
       if (Array.isArray(toolParts)) {
         for (const part of toolParts) {
-          parts.push(part as UIMessage["parts"][number]);
+          if (isValidMessagePart(part)) {
+            parts.push(part);
+          }
         }
       }
     } catch {
