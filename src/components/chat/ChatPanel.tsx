@@ -1206,7 +1206,6 @@ export function ChatPanel({
                 }}
                 placeholder="Type a message to get started..."
                 className="min-h-24 max-h-40 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-60"
-                disabled={false}
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-muted">
