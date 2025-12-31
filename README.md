@@ -121,6 +121,24 @@ bun run test:e2e:ui
 
 E2E runs with `PLAYWRIGHT=1` + `MOCK_CHAT=1` and uses `DB_PATH=test-results/playwright.sqlite` (no API key required).
 
+### Playwright e2e (real model)
+
+Start the dev server manually with real-model mode enabled:
+
+```bash
+PLAYWRIGHT=1 REAL_MODEL=1 DB_PATH=test-results/playwright.sqlite bun run dev
+```
+
+Then run Playwright in another terminal:
+
+```bash
+bunx playwright test --config=playwright.real.config.ts --reporter=list
+# or
+bunx playwright test --config=playwright.real.config.ts --reporter=list -g "7.1"
+```
+
+Requires a real model configured in `.env.local` (e.g. `OPENAI_API_KEY`) and `MOCK_CHAT` must be unset or `0`.
+
 ## Limitations / notes
 
 - SheetJS (`xlsx`) does not recalculate formulas server-side. Formula cells may show cached/stale values until the file is opened in Excel.
