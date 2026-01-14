@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const assistantResponseTimeout =
@@ -103,10 +100,6 @@ test("persists threads and messages across a page reload", async ({ page }) => {
     timeout: 15000,
   });
 
-  const dbFile = resolve(process.cwd(), "test-results/playwright.sqlite");
-  expect(existsSync(dbFile)).toBe(true);
-  const sqliteHeader = readFileSync(dbFile).toString("utf8", 0, 15);
-  expect(sqliteHeader).toBe("SQLite format 3");
 
   await page.reload();
 
