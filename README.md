@@ -61,13 +61,38 @@ OPENAI_API_KEY=...
 
 Make sure `MOCK_CHAT` is not set to `1` (unset it or set it to `0`) so the server uses the real model.
 
-Optional:
+##### OpenAI direct
 
-- `OPENAI_BASE_URL` (OpenAI-compatible providers like OpenRouter)
-- `OPENAI_MODEL` (defaults to `gpt-4o-mini`)
-- `OPENAI_API_MODE` (`chat` vs `responses`)
-- `OPENAI_REFERER`, `OPENAI_TITLE` (useful for OpenRouter attribution)
-- `DB_PATH` (SQLite file location; defaults to `data/app.sqlite`)
+```bash
+OPENAI_API_KEY=sk-...
+# Optional: override model (defaults to gpt-4o-mini)
+# OPENAI_MODEL=gpt-4o
+```
+
+##### OpenRouter (or other OpenAI-compatible providers)
+
+```bash
+OPENAI_API_KEY=sk-or-v1-...
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_MODEL=anthropic/claude-sonnet-4
+# Required for OpenRouter and most compatible providers
+OPENAI_API_MODE=chat
+# Optional: OpenRouter attribution headers
+OPENAI_REFERER=https://your-site.com
+OPENAI_TITLE=Your App Name
+```
+
+##### Environment variable reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | API key for OpenAI or compatible provider |
+| `OPENAI_BASE_URL` | No | Override base URL (e.g. `https://openrouter.ai/api/v1`) |
+| `OPENAI_MODEL` | No | Model id (defaults to `gpt-4o-mini`) |
+| `OPENAI_API_MODE` | No | `chat` for `/chat/completions`, `responses` for OpenAI Responses API. Defaults to `responses` for OpenAI, auto-selects `chat` when `OPENAI_BASE_URL` is set. |
+| `OPENAI_REFERER` | No | `HTTP-Referer` header (OpenRouter attribution) |
+| `OPENAI_TITLE` | No | `X-Title` header (OpenRouter attribution) |
+| `DB_PATH` | No | SQLite file location (defaults to `data/app.sqlite`) |
 
 ### 3) Start the dev server
 
@@ -119,7 +144,12 @@ bun run test:e2e
 bun run test:e2e:ui
 ```
 
-E2E runs with `PLAYWRIGHT=1` + `MOCK_CHAT=1` and uses `DB_PATH=test-results/playwright.sqlite` (no API key required).
+E2E runs with `PLAYWRIGHT=1` and uses `DB_PATH=test-results/playwright.sqlite`.
+
+- Default mode sets `MOCK_CHAT=1` (no API key required).
+- Real model mode: `PLAYWRIGHT_REAL_AI=1 bun run test:e2e` (requires `OPENAI_API_KEY`; makes real API calls and will be slower/cost money).
+- Next dev uses Turbopack by default for speed; set `PLAYWRIGHT_WEBPACK=1` to force webpack.
+- The `test:e2e*` scripts set `PW_DISABLE_TS_ESM=1` and `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true` to avoid hangs on some Bun/Linux setups.
 
 ### Playwright e2e (real model)
 
