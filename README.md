@@ -8,7 +8,7 @@ A demo / assignment app: ChatGPT-style UI with threaded conversations, SQLite pe
 - Streaming chat via Vercel AI SDK UI (`useChat`) + server streaming route (`POST /api/chat`).
 - Spreadsheet tools for the bundled workbook at `data/example.xlsx` (Sheet1 only):
   - Read ranges and render previews + modal selection → mention insertion (`@Sheet1!A1:C5`).
-  - Update individual cells (writes back to `data/example.xlsx`) — gated behind explicit UI confirmation.
+  - Update individual cells (writes back to the configured workbook; defaults to `data/example.xlsx`) — gated behind explicit UI confirmation.
   - Explain formulas (reads formula text from a cell).
   - Mock “send invites” tool.
 - Dangerous actions (cell edits, thread deletion) require confirmation tokens.
@@ -59,7 +59,7 @@ Set at minimum:
 OPENAI_API_KEY=...
 ```
 
-Make sure `MOCK_CHAT` is not set to `1` (unset it or set it to `0`) so the server uses the real model.
+Make sure `MOCK_CHAT` is not set to `1` (unset it) so the server uses the real model.
 
 ##### OpenAI direct
 
@@ -93,6 +93,7 @@ OPENAI_TITLE=Your App Name
 | `OPENAI_REFERER` | No | `HTTP-Referer` header (OpenRouter attribution) |
 | `OPENAI_TITLE` | No | `X-Title` header (OpenRouter attribution) |
 | `DB_PATH` | No | SQLite file location (defaults to `data/app.sqlite`) |
+| `WORKBOOK_PATH` | No | XLSX file location (defaults to `data/example.xlsx`) |
 
 ### 3) Start the dev server
 
@@ -142,11 +143,11 @@ bun run scripts/generate-example-xlsx.ts
 - **Confirmation gating**: All dangerous actions (cell updates, thread deletion, invites) require explicit user approval via `confirmAction` client tool with token validation.
 - **Range mentions**: Select cells in modal → insert `@Sheet1!A1:B5` mentions into chat input.
 - **Generative UI**: Tool results render as interactive cards (table previews, confirmation dialogs, JSON viewers).
-- **E2E tests**: Playwright tests covering thread CRUD, chat flow, message persistence (6 tests).
+- **E2E tests**: Playwright tests covering thread CRUD, chat flow, message persistence (mock suite), plus a separate real-model suite.
 
 ### Partial / simplified
 
-- **Thread titles**: Uses first ~25 chars of first user message (no LLM-generated summaries).
+- **Thread titles**: Uses first ~30 chars of first user message (no LLM-generated summaries).
 - **Single sheet support**: Only `Sheet1` is recognized; multi-sheet workbooks are not supported.
 - **Mock send invites**: Logs to console instead of actually sending emails.
 
@@ -157,23 +158,50 @@ bun run scripts/generate-example-xlsx.ts
 - No user authentication or multi-user support.
 - No message editing or regeneration.
 
-### Playwright e2e (real model)
+## Playwright e2e (simple rules)
 
-Start the dev server manually with real-model mode enabled:
+- **Mock e2e** = `playwright.config.ts` (always uses `MOCK_CHAT=1`)
+- **Real-model e2e** = `playwright.real.config.ts` (always uses real model, `MOCK_CHAT` disabled)
+
+Both configs start a Next dev server automatically and set:
+
+- `PLAYWRIGHT=1` so `/api/test/reset` is enabled
+- `DB_PATH=test-results/playwright.sqlite` so tests use an isolated sqlite db
+- `WORKBOOK_PATH=test-results/workbook.xlsx` so XLSX mutations never touch `data/example.xlsx`
+
+### Run mock e2e (default)
 
 ```bash
-PLAYWRIGHT=1 REAL_MODEL=1 DB_PATH=test-results/playwright.sqlite bun run dev
+bun run test:e2e
 ```
 
-Then run Playwright in another terminal:
+### Run real-model e2e (only `e2e/real-model.e2e.ts`)
+
+Requires `.env.local` to include at least:
 
 ```bash
-bunx playwright test --config=playwright.real.config.ts --reporter=list
-# or
-bunx playwright test --config=playwright.real.config.ts --reporter=list -g "7.1"
+OPENAI_API_KEY=...
 ```
 
-Requires a real model configured in `.env.local` (e.g. `OPENAI_API_KEY`) and `MOCK_CHAT` must be unset or `0`.
+Then run:
+
+```bash
+bun run test:e2e:real
+```
+
+Note: one multi-step XLSX test is intentionally skipped by default because it depends on LLM tool-call compliance.
+Enable it with:
+
+```bash
+PLAYWRIGHT_ALLOW_FLAKY_AI=1 bun run test:e2e:real
+```
+
+### Filter / debug
+
+```bash
+bun run test:e2e -- -g "threads"
+bun run test:e2e:real -- -g "5.1"
+```
 
 ## Limitations / notes
 
