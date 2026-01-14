@@ -127,29 +127,35 @@ bun run scripts/generate-example-xlsx.ts
   - Drag to select a sub-range and click “Insert mention” to add it to your draft.
 - When the assistant proposes a cell update or thread deletion, approve/decline in the confirmation card.
 
-## Testing
+## What's Implemented
 
-```bash
-bun test
-bun run typecheck
-bun run lint
-```
+### Fully implemented
 
-### Playwright e2e
+- **Threaded chat UI**: Sidebar with thread list, create/switch/delete threads, auto-generated titles from first user message.
+- **Message persistence**: SQLite storage via `bun:sqlite` with full `UIMessage` JSON for tool parts.
+- **Streaming responses**: Real-time streaming via Vercel AI SDK with `useChat` and `streamText`.
+- **Spreadsheet tools**:
+  - `readRange`: Read cell ranges with table preview and modal grid.
+  - `updateCell`: Write to cells (gated by confirmation).
+  - `explainFormula`: Explain formulas in cells.
+  - `sendInvites`: Mock tool to "send invites" from email ranges (gated by confirmation).
+- **Confirmation gating**: All dangerous actions (cell updates, thread deletion, invites) require explicit user approval via `confirmAction` client tool with token validation.
+- **Range mentions**: Select cells in modal → insert `@Sheet1!A1:B5` mentions into chat input.
+- **Generative UI**: Tool results render as interactive cards (table previews, confirmation dialogs, JSON viewers).
+- **E2E tests**: Playwright tests covering thread CRUD, chat flow, message persistence (6 tests).
 
-```bash
-bunx playwright install
-bun run test:e2e
-# or
-bun run test:e2e:ui
-```
+### Partial / simplified
 
-E2E runs with `PLAYWRIGHT=1` and uses `DB_PATH=test-results/playwright.sqlite`.
+- **Thread titles**: Uses first ~25 chars of first user message (no LLM-generated summaries).
+- **Single sheet support**: Only `Sheet1` is recognized; multi-sheet workbooks are not supported.
+- **Mock send invites**: Logs to console instead of actually sending emails.
 
-- Default mode sets `MOCK_CHAT=1` (no API key required).
-- Real model mode: `PLAYWRIGHT_REAL_AI=1 bun run test:e2e` (requires `OPENAI_API_KEY`; makes real API calls and will be slower/cost money).
-- Next dev uses Turbopack by default for speed; set `PLAYWRIGHT_WEBPACK=1` to force webpack.
-- The `test:e2e*` scripts set `PW_DISABLE_TS_ESM=1` and `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true` to avoid hangs on some Bun/Linux setups.
+### Limitations
+
+- SheetJS does not recalculate formulas server-side (cached values only).
+- XLSX writes assume writable local filesystem (not serverless-safe).
+- No user authentication or multi-user support.
+- No message editing or regeneration.
 
 ### Playwright e2e (real model)
 
