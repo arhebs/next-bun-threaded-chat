@@ -115,7 +115,12 @@ describe("db", () => {
 
     const [loaded] = loadUIMessages(thread.id);
     expect(loaded.parts).toEqual([{ type: "text", text: "updated" }]);
-    expect((loaded.metadata as any)?.createdAt).toBe(1000);
+    const metadata = loaded.metadata;
+    const createdAt =
+      metadata && typeof metadata === "object" && "createdAt" in metadata
+        ? (metadata as { createdAt?: unknown }).createdAt
+        : undefined;
+    expect(createdAt).toBe(1000);
   });
 
   it("rejects upserts when a message id belongs to a different thread", () => {
