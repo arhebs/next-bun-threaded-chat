@@ -51,13 +51,7 @@ function buildExtraHeaders(): Record<string, string> | undefined {
 }
 
 function isMockChatEnabled(): boolean {
-  if (env.MOCK_CHAT === "1") {
-    return true;
-  }
-  if (env.PLAYWRIGHT === "1" && process.env.REAL_MODEL !== "1") {
-    return true;
-  }
-  return false;
+  return env.MOCK_CHAT === "1";
 }
 
 function extractLastUserText(messages: UIMessage[]): string {

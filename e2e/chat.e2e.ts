@@ -1,7 +1,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+const assistantResponseTimeout =
+  process.env.PLAYWRIGHT_REAL_AI === "1" ? 90_000 : 15_000;
+
+async function clickSendAndWaitForAssistant(
+  page: Page,
+  send: Locator
+): Promise<void> {
+  const chatLog = page.getByRole("log", { name: "Chat messages" });
+  const assistantMessages = chatLog.getByText("assistant", { exact: true });
+  const before = await assistantMessages.count();
+
+  await send.click();
+
+  await expect(assistantMessages).toHaveCount(before + 1, {
+    timeout: assistantResponseTimeout,
+  });
+}
 
 test.beforeEach(async ({ request }) => {
   const response = await request.post("/api/test/reset");
@@ -21,9 +39,7 @@ test("creates a thread and updates title after first message", async ({ page }) 
 
   const send = page.getByRole("button", { name: "Send" });
   await expect(send).toBeEnabled();
-  await send.click();
-
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
 
   await expect(
     page.getByRole("button", { name: /This is a very long title that\.\.\./ })
@@ -40,8 +56,7 @@ test("switches between threads and shows the correct history", async ({ page }) 
 
   await input.fill("Alpha");
   await expect(send).toBeEnabled();
-  await send.click();
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
   await expect(page.getByRole("button", { name: /Alpha/ })).toBeVisible();
 
   await page.getByRole("button", { name: "New" }).click();
@@ -49,8 +64,7 @@ test("switches between threads and shows the correct history", async ({ page }) 
 
   await input.fill("Beta");
   await expect(send).toBeEnabled();
-  await send.click();
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
   await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await expect(page.getByRole("heading", { name: "Beta" })).toBeVisible();
@@ -84,9 +98,7 @@ test("persists threads and messages across a page reload", async ({ page }) => {
 
   await input.fill("Hello");
   await expect(send).toBeEnabled();
-  await send.click();
-
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
   await expect(page.getByRole("button", { name: /Hello/ })).toBeVisible({
     timeout: 15000,
   });
@@ -106,7 +118,7 @@ test("persists threads and messages across a page reload", async ({ page }) => {
   const chatLog = page.getByRole("log", { name: "Chat messages" });
 
   await expect(chatLog.getByText("Hello", { exact: true })).toBeVisible();
-  await expect(chatLog.getByText("Mock response.")).toBeVisible();
+  await expect(chatLog.getByText("assistant", { exact: true })).toBeVisible();
 });
 
 test("opens a table modal and inserts a mention from selection", async ({
@@ -121,9 +133,7 @@ test("opens a table modal and inserts a mention from selection", async ({
 
   await input.fill("Show @Sheet1!A1:B2");
   await expect(send).toBeEnabled();
-  await send.click();
-
-  await expect(page.getByText("Loaded mentioned range.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
 
   const preview = page
     .getByRole("log", { name: "Chat messages" })
@@ -160,8 +170,7 @@ test("approving a confirmation deletes the active thread", async ({ page }) => {
 
   await input.fill("Alpha");
   await expect(send).toBeEnabled();
-  await send.click();
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
   await expect(page.getByRole("button", { name: /Alpha/ })).toBeVisible();
 
   await page.getByRole("button", { name: "New" }).click();
@@ -169,8 +178,7 @@ test("approving a confirmation deletes the active thread", async ({ page }) => {
 
   await input.fill("Beta");
   await expect(send).toBeEnabled();
-  await send.click();
-  await expect(page.getByText("Mock response.")).toBeVisible();
+  await clickSendAndWaitForAssistant(page, send);
   await expect(page.getByRole("button", { name: /Beta/ })).toBeVisible({ timeout: 15000 });
 
   await input.fill("Please delete this thread");
@@ -182,8 +190,6 @@ test("approving a confirmation deletes the active thread", async ({ page }) => {
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Approve" }).click();
-
-  await expect(page.getByText("Action confirmed.")).toBeVisible();
 
   await expect(page.getByRole("button", { name: /Beta/ })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Alpha" })).toBeVisible();
