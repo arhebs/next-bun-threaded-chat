@@ -29,14 +29,14 @@ describe("client api", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }) as any;
+    }) as unknown as typeof fetch;
 
     const threads = await listThreads();
     expect(threads).toEqual([]);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.input).toBe("/api/threads");
-    expect((calls[0]?.init?.headers as any)?.["Content-Type"]).toBe(
+    expect(new Headers(calls[0]?.init?.headers).get("Content-Type")).toBe(
       "application/json"
     );
   });
@@ -56,7 +56,7 @@ describe("client api", () => {
         status: 201,
         headers: { "Content-Type": "application/json" },
       });
-    }) as any;
+    }) as unknown as typeof fetch;
 
     const thread = await createThread();
     expect(thread.id).toBe("t1");
@@ -73,7 +73,7 @@ describe("client api", () => {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
-    }) as any;
+    }) as unknown as typeof fetch;
 
     await expect(listThreads()).rejects.toThrow("Nope");
   });
@@ -85,7 +85,7 @@ describe("client api", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }) as any;
+    }) as unknown as typeof fetch;
 
     await fetchThreadMessages("a/b");
     expect(calls).toHaveLength(1);
