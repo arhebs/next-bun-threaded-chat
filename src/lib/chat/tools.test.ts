@@ -22,7 +22,7 @@ function createConfirmMessage(output: unknown): UIMessage {
         type: "tool-confirmAction",
         toolCallId: "tool-call-1",
         output,
-      } as any,
+      } as unknown as UIMessage["parts"][number],
     ],
   };
 }
@@ -33,6 +33,19 @@ function withContext(messages: UIMessage[]) {
       uiMessages: messages,
     },
   };
+}
+
+function getExecute(toolCandidate: unknown): (...args: unknown[]) => Promise<unknown> {
+  if (!toolCandidate || typeof toolCandidate !== "object") {
+    throw new Error("Tool is missing execute");
+  }
+
+  const execute = (toolCandidate as { execute?: unknown }).execute;
+  if (typeof execute !== "function") {
+    throw new Error("Tool is missing execute");
+  }
+
+  return execute as (...args: unknown[]) => Promise<unknown>;
 }
 
 function createTempWorkbookCopy(): { workbookPath: string; cleanup: () => void } {
@@ -84,35 +97,42 @@ describe("chat tools", () => {
   });
 
   it("sendInvites returns the same emails and message", async () => {
-    const execute = (tools.sendInvites as any).execute as (input: any) => Promise<any>;
+    const execute = getExecute(tools.sendInvites) as (input: unknown) => Promise<unknown>;
     const result = await execute({ emails: ["a@example.com"], message: "Hello" });
 
     expect(result).toEqual({ sent: ["a@example.com"], message: "Hello" });
   });
 
   it("readRange returns the Sheet1 header row", async () => {
-    const execute = (tools.readRange as any).execute as (input: any) => Promise<any>;
+    const execute = getExecute(tools.readRange) as (input: unknown) => Promise<unknown>;
     const result = await execute({ sheet: "Sheet1", range: "A1:F1" });
 
-    expect(result.sheet).toBe("Sheet1");
-    expect(result.range).toBe("A1:F1");
-    expect(result.values).toEqual([
+    const record = result as {
+      sheet?: unknown;
+      range?: unknown;
+      values?: unknown;
+    };
+
+    expect(record.sheet).toBe("Sheet1");
+    expect(record.range).toBe("A1:F1");
+    expect(record.values).toEqual([
       ["ID", "Name", "Email", "Region", "SalesAmount", "Commission"],
     ]);
   });
 
   it("explainFormula returns the formula string", async () => {
-    const execute = (tools.explainFormula as any).execute as (input: any) => Promise<any>;
+    const execute = getExecute(tools.explainFormula) as (input: unknown) => Promise<unknown>;
     const result = await execute({ sheet: "Sheet1", cell: "f2" });
 
-    expect(result.formula).toBe("=E2*0.1");
+    const record = result as { formula?: unknown };
+    expect(record.formula).toBe("=E2*0.1");
   });
 
   it("updateCell requires a matching confirmation", async () => {
-    const execute = (tools.updateCell as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const execute = getExecute(tools.updateCell) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
     await expect(
       execute({ sheet: "Sheet1", cell: "A1", value: 1 }, withContext([]))
@@ -120,10 +140,10 @@ describe("chat tools", () => {
   });
 
   it("updateCell rejects denied confirmations", async () => {
-    const execute = (tools.updateCell as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const execute = getExecute(tools.updateCell) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
     const messages: UIMessage[] = [
       createConfirmMessage({
@@ -140,12 +160,12 @@ describe("chat tools", () => {
   });
 
   it("updateCell writes to the workbook after approval", async () => {
-    const updateExecute = (tools.updateCell as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const updateExecute = getExecute(tools.updateCell) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
-    const readExecute = (tools.readRange as any).execute as (input: any) => Promise<any>;
+    const readExecute = getExecute(tools.readRange) as (input: unknown) => Promise<unknown>;
 
     const payload = {
       sheet: "Sheet1",
@@ -167,14 +187,15 @@ describe("chat tools", () => {
     expect(result).toEqual(payload);
 
     const readBack = await readExecute({ sheet: "Sheet1", range: "B2" });
-    expect(readBack.values).toEqual([[payload.value]]);
+    const readBackRecord = readBack as { values?: unknown };
+    expect(readBackRecord.values).toEqual([[payload.value]]);
   });
 
   it("deleteThread requires a matching confirmation", async () => {
-    const execute = (tools.deleteThread as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const execute = getExecute(tools.deleteThread) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
     await expect(
       execute({ threadId: "thread-1" }, withContext([]))
@@ -182,10 +203,10 @@ describe("chat tools", () => {
   });
 
   it("deleteThread rejects denied confirmations", async () => {
-    const execute = (tools.deleteThread as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const execute = getExecute(tools.deleteThread) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
     const messages: UIMessage[] = [
       createConfirmMessage({
@@ -202,10 +223,10 @@ describe("chat tools", () => {
   });
 
   it("deleteThread deletes the thread after approval", async () => {
-    const execute = (tools.deleteThread as any).execute as (
-      input: any,
-      options: any
-    ) => Promise<any>;
+    const execute = getExecute(tools.deleteThread) as (
+      input: unknown,
+      options: unknown
+    ) => Promise<unknown>;
 
     const thread = createThread();
 

@@ -19,7 +19,7 @@ function messageWithConfirmOutput(output: unknown): UIMessage {
         type: "tool-confirmAction",
         toolCallId: "call-1",
         output,
-      } as any,
+      } as unknown as UIMessage["parts"][number],
     ],
   };
 }
@@ -35,7 +35,7 @@ function messageWithToolInvocation(output: unknown): UIMessage {
           toolName: "confirmAction",
           result: output,
         },
-      } as any,
+      } as unknown as UIMessage["parts"][number],
     ],
   };
 }

@@ -13,7 +13,7 @@ describe("message-extract", () => {
       role: "assistant",
       parts: [
         { type: "text", text: "Hello" },
-        { type: "reasoning", text: "(hidden reasoning)" } as any,
+        { type: "tool-confirmAction", toolCallId: "t-ignore" } as unknown as UIMessage["parts"][number],
         { type: "text", text: " world" },
       ],
     };
@@ -25,7 +25,9 @@ describe("message-extract", () => {
     const message: UIMessage = {
       id: "m2",
       role: "assistant",
-      parts: [{ type: "step-start" } as any],
+      parts: [
+        { type: "tool-confirmAction", toolCallId: "t2" } as unknown as UIMessage["parts"][number],
+      ],
     };
 
     expect(extractContentText(message)).toBeNull();
@@ -37,14 +39,13 @@ describe("message-extract", () => {
       role: "assistant",
       parts: [
         { type: "text", text: "hi" },
-        { type: "tool-confirmAction", toolCallId: "t1" } as any,
-        { type: "dynamic-tool", toolName: "sendInvites" } as any,
-        { type: "step-start" } as any,
+        { type: "tool-confirmAction", toolCallId: "t1" } as unknown as UIMessage["parts"][number],
+        { type: "dynamic-tool", toolName: "sendInvites" } as unknown as UIMessage["parts"][number],
       ],
     };
 
     const parts = extractToolInvocations(message);
-    expect(parts.map((part: any) => part.type)).toEqual([
+    expect(parts.map((part) => part.type)).toEqual([
       "tool-confirmAction",
       "dynamic-tool",
     ]);
