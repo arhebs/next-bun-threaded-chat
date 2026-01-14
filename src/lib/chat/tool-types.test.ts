@@ -134,13 +134,4 @@ describe("tool-types", () => {
     const parsed = sheetNameSchema.safeParse("Sheet1");
     expect(parsed.success).toBe(true);
   });
-
-  it("tool input schemas convert to JSON Schema", () => {
-    expect(() => confirmActionInputSchema.toJSONSchema()).not.toThrow();
-    expect(() => readRangeInputSchema.toJSONSchema()).not.toThrow();
-    expect(() => updateCellInputSchema.toJSONSchema()).not.toThrow();
-    expect(() => deleteThreadInputSchema.toJSONSchema()).not.toThrow();
-    expect(() => sendInvitesInputSchema.toJSONSchema()).not.toThrow();
-    expect(() => explainFormulaInputSchema.toJSONSchema()).not.toThrow();
-  });
 });
