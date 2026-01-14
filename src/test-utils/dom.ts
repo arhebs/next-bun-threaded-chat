@@ -25,36 +25,38 @@ export function installDom(): DomHandle {
     return globalForDom.__testDomHandle;
   }
 
+  const globalRecord = globalThis as unknown as Record<string, unknown>;
+
   const snapshot: GlobalSnapshot = {
-    window: (globalThis as any).window,
-    document: (globalThis as any).document,
-    navigator: (globalThis as any).navigator,
-    HTMLElement: (globalThis as any).HTMLElement,
-    Node: (globalThis as any).Node,
-    requestAnimationFrame: (globalThis as any).requestAnimationFrame,
-    cancelAnimationFrame: (globalThis as any).cancelAnimationFrame,
-    IS_REACT_ACT_ENVIRONMENT: (globalThis as any).IS_REACT_ACT_ENVIRONMENT,
+    window: globalRecord["window"],
+    document: globalRecord["document"],
+    navigator: globalRecord["navigator"],
+    HTMLElement: globalRecord["HTMLElement"],
+    Node: globalRecord["Node"],
+    requestAnimationFrame: globalRecord["requestAnimationFrame"],
+    cancelAnimationFrame: globalRecord["cancelAnimationFrame"],
+    IS_REACT_ACT_ENVIRONMENT: globalRecord["IS_REACT_ACT_ENVIRONMENT"],
   };
 
   const window = new Window({
     url: "http://localhost/",
   });
 
-  (globalThis as any).window = window;
-  (globalThis as any).document = window.document;
-  (globalThis as any).navigator = window.navigator;
-  (globalThis as any).HTMLElement = window.HTMLElement;
-  (globalThis as any).Node = window.Node;
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  globalRecord["window"] = window;
+  globalRecord["document"] = window.document;
+  globalRecord["navigator"] = window.navigator;
+  globalRecord["HTMLElement"] = window.HTMLElement;
+  globalRecord["Node"] = window.Node;
+  globalRecord["IS_REACT_ACT_ENVIRONMENT"] = true;
 
-  if (typeof (globalThis as any).requestAnimationFrame !== "function") {
-    (globalThis as any).requestAnimationFrame = (callback: FrameRequestCallback) => {
+  if (typeof globalRecord["requestAnimationFrame"] !== "function") {
+    globalRecord["requestAnimationFrame"] = (callback: FrameRequestCallback) => {
       return setTimeout(() => callback(Date.now()), 0) as unknown as number;
     };
   }
 
-  if (typeof (globalThis as any).cancelAnimationFrame !== "function") {
-    (globalThis as any).cancelAnimationFrame = (handle: number) => {
+  if (typeof globalRecord["cancelAnimationFrame"] !== "function") {
+    globalRecord["cancelAnimationFrame"] = (handle: number) => {
       clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
     };
   }
@@ -62,15 +64,14 @@ export function installDom(): DomHandle {
   const handle: DomHandle = {
     window,
     cleanup: () => {
-      (globalThis as any).window = snapshot.window;
-      (globalThis as any).document = snapshot.document;
-      (globalThis as any).navigator = snapshot.navigator;
-      (globalThis as any).HTMLElement = snapshot.HTMLElement;
-      (globalThis as any).Node = snapshot.Node;
-      (globalThis as any).requestAnimationFrame = snapshot.requestAnimationFrame;
-      (globalThis as any).cancelAnimationFrame = snapshot.cancelAnimationFrame;
-      (globalThis as any).IS_REACT_ACT_ENVIRONMENT =
-        snapshot.IS_REACT_ACT_ENVIRONMENT;
+      globalRecord["window"] = snapshot.window;
+      globalRecord["document"] = snapshot.document;
+      globalRecord["navigator"] = snapshot.navigator;
+      globalRecord["HTMLElement"] = snapshot.HTMLElement;
+      globalRecord["Node"] = snapshot.Node;
+      globalRecord["requestAnimationFrame"] = snapshot.requestAnimationFrame;
+      globalRecord["cancelAnimationFrame"] = snapshot.cancelAnimationFrame;
+      globalRecord["IS_REACT_ACT_ENVIRONMENT"] = snapshot.IS_REACT_ACT_ENVIRONMENT;
       delete globalForDom.__testDomHandle;
     },
   };

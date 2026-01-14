@@ -197,18 +197,18 @@ describe("ChatPanel", () => {
         id: "assistant-range",
         role: "assistant",
         parts: [
-          {
-            type: "tool-readRange",
-            toolCallId: "call-range",
-            state: "output-available",
-            output: {
-              sheet: "Sheet1",
-              range: "A1:F1",
-              values: [
-                ["ID", "Name", "Email", "Region", "SalesAmount", "Commission"],
-              ],
-            },
-          } as any,
+           {
+             type: "tool-readRange",
+             toolCallId: "call-range",
+             state: "output-available",
+             output: {
+               sheet: "Sheet1",
+               range: "A1:F1",
+               values: [
+                 ["ID", "Name", "Email", "Region", "SalesAmount", "Commission"],
+               ],
+             },
+           } as unknown as UIMessage["parts"][number],
         ],
       },
     ];
@@ -246,19 +246,19 @@ describe("ChatPanel", () => {
         id: "assistant-range",
         role: "assistant",
         parts: [
-          {
-            type: "tool-readRange",
-            toolCallId: "call-range",
-            state: "output-available",
-            output: {
-              sheet: "Sheet1",
-              range: "A1:B2",
-              values: [
-                ["ID", "Name"],
-                [1, "Ava Chen"],
-              ],
-            },
-          } as any,
+           {
+             type: "tool-readRange",
+             toolCallId: "call-range",
+             state: "output-available",
+             output: {
+               sheet: "Sheet1",
+               range: "A1:B2",
+               values: [
+                 ["ID", "Name"],
+                 [1, "Ava Chen"],
+               ],
+             },
+           } as unknown as UIMessage["parts"][number],
         ],
       },
     ];
@@ -346,16 +346,16 @@ describe("ChatPanel", () => {
         id: "assistant-1",
         role: "assistant",
         parts: [
-          {
-            type: "tool-confirmAction",
-            toolCallId: "call-1",
-            state: "input-available",
-            input: {
-              action: "deleteThread",
-              actionPayload: { threadId: "thread-1" },
-              prompt: "Confirm delete",
-            },
-          } as any,
+           {
+             type: "tool-confirmAction",
+             toolCallId: "call-1",
+             state: "input-available",
+             input: {
+               action: "deleteThread",
+               actionPayload: { threadId: "thread-1" },
+               prompt: "Confirm delete",
+             },
+           } as unknown as UIMessage["parts"][number],
         ],
       },
     ];
@@ -374,28 +374,52 @@ describe("ChatPanel", () => {
 
     expect(addToolOutputCalls).toHaveLength(2);
 
-    const firstCall = addToolOutputCalls[0] as any;
-    const secondCall = addToolOutputCalls[1] as any;
+    const firstCall = addToolOutputCalls[0] as unknown as {
+      tool?: unknown;
+      toolCallId?: unknown;
+      output?: unknown;
+    };
+    const secondCall = addToolOutputCalls[1] as unknown as {
+      tool?: unknown;
+      toolCallId?: unknown;
+      output?: unknown;
+    };
 
     expect(firstCall.tool).toBe("confirmAction");
     expect(firstCall.toolCallId).toBe("call-1");
-    expect(firstCall.output.approved).toBe(true);
-    expect(firstCall.output.action).toBe("deleteThread");
-    expect(firstCall.output.actionPayload).toEqual({ threadId: "thread-1" });
-    expect(typeof firstCall.output.confirmationToken).toBe("string");
-    expect(firstCall.output.confirmationToken.length).toBeGreaterThan(0);
 
-    expect(secondCall.output.confirmationToken).toBe(
-      firstCall.output.confirmationToken
-    );
+    const firstOutput = firstCall.output as unknown as {
+      approved?: unknown;
+      action?: unknown;
+      actionPayload?: unknown;
+      confirmationToken?: unknown;
+    };
+
+    const secondOutput = secondCall.output as unknown as {
+      confirmationToken?: unknown;
+    };
+
+    expect(firstOutput.approved).toBe(true);
+    expect(firstOutput.action).toBe("deleteThread");
+    expect(firstOutput.actionPayload).toEqual({ threadId: "thread-1" });
+    expect(typeof firstOutput.confirmationToken).toBe("string");
+    expect((firstOutput.confirmationToken as string).length).toBeGreaterThan(0);
+
+    expect(secondOutput.confirmationToken).toBe(firstOutput.confirmationToken);
 
     addToolOutputCalls.length = 0;
 
     await user.click(screen.getByRole("button", { name: "Decline" }));
 
     expect(addToolOutputCalls).toHaveLength(1);
-    const declined = addToolOutputCalls[0] as any;
-    expect(declined.output.approved).toBe(false);
-    expect(declined.output.reason).toBe("User declined");
+
+    const declined = addToolOutputCalls[0] as unknown as { output?: unknown };
+    const declinedOutput = declined.output as unknown as {
+      approved?: unknown;
+      reason?: unknown;
+    };
+
+    expect(declinedOutput.approved).toBe(false);
+    expect(declinedOutput.reason).toBe("User declined");
   });
 });
