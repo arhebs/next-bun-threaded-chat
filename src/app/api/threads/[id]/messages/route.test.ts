@@ -74,18 +74,18 @@ describe("GET /api/threads/:id/messages", () => {
           id: "a1",
           role: "assistant",
           parts: [
-            {
-              type: "tool-readRange",
-              toolCallId: "call-1",
-              state: "output-available",
-              output: {
-                sheet: "Sheet1",
-                range: "A1",
-                values: "not-a-2d-array",
-              },
-            } as any,
+             {
+               type: "tool-readRange",
+               toolCallId: "call-1",
+               state: "output-available",
+               output: {
+                 sheet: "Sheet1",
+                 range: "A1",
+                 values: "not-a-2d-array",
+               },
+             } as unknown as UIMessage["parts"][number],
           ],
-        } as any,
+        },
       ];
 
       upsertMessages(thread.id, messages);

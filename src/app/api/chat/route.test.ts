@@ -218,7 +218,8 @@ describe("POST /api/chat", () => {
       expect(persisted).toHaveLength(2);
       expect(persisted[0]?.id).toBe("u1");
       expect(persisted[1]?.role).toBe("assistant");
-      expect((persisted[1]?.parts?.[0] as any)?.text).toBe("ok");
+      const firstPart = persisted[1]?.parts?.[0];
+      expect(firstPart && firstPart.type === "text" ? firstPart.text : undefined).toBe("ok");
     } finally {
       Date.now = realNow;
     }
