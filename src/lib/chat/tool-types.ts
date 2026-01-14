@@ -5,6 +5,24 @@ import { normalizeA1Cell, normalizeA1Range } from "@/lib/xlsx/range";
 export const sheetNameSchema = z.literal("Sheet1");
 const sheetNameInputSchema = sheetNameSchema.default("Sheet1");
 
+const A1_CELL_REGEX = /^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/;
+const A1_RANGE_REGEX =
+  /^\$?[A-Za-z]{1,3}\$?[1-9]\d*(?::\$?[A-Za-z]{1,3}\$?[1-9]\d*)?$/;
+
+export const a1RangeInputSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(A1_RANGE_REGEX, "A1 range like A1:C5")
+  .describe("A1 range like A1:C5");
+
+export const a1CellInputSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(A1_CELL_REGEX, "A1 cell like B2")
+  .describe("A1 cell like B2");
+
 function createNormalizedSchema(
   description: string,
   normalize: (value: string) => string
@@ -29,10 +47,7 @@ export const a1RangeSchema = createNormalizedSchema(
   normalizeA1Range
 );
 
-export const a1CellSchema = createNormalizedSchema(
-  "A1 cell like B2",
-  normalizeA1Cell
-);
+export const a1CellSchema = createNormalizedSchema("A1 cell like B2", normalizeA1Cell);
 
 export const cellValueSchema = z.union([
   z.string(),
@@ -71,10 +86,6 @@ export const updateCellPayloadSchema = z.object({
   value: updateCellValueSchema,
 });
 
-const updateCellPayloadInputSchema = updateCellPayloadSchema.extend({
-  sheet: sheetNameInputSchema,
-});
-
 export const deleteThreadPayloadSchema = z.object({
   threadId: z.string().min(1),
 });
@@ -84,7 +95,24 @@ export const sendInvitesPayloadSchema = z.object({
   message: z.string().optional(),
 });
 
-function preprocessLooseJson(value: unknown): unknown {
+const updateCellPayloadInputSchema = z.object({
+  sheet: sheetNameInputSchema,
+  cell: a1CellInputSchema,
+  value: cellValueSchema,
+});
+
+const deleteThreadPayloadInputSchema = deleteThreadPayloadSchema;
+const sendInvitesPayloadInputSchema = sendInvitesPayloadSchema;
+
+function tryParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+export function parseLooseJson(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;
   }
@@ -94,10 +122,9 @@ function preprocessLooseJson(value: unknown): unknown {
     return value;
   }
 
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // fall through
+  const direct = tryParseJson(trimmed);
+  if (direct !== null) {
+    return direct;
   }
 
   const normalized = trimmed
@@ -106,31 +133,47 @@ function preprocessLooseJson(value: unknown): unknown {
     .replace(/\bFalse\b/g, "false")
     .replace(/'/g, '"');
 
-  try {
-    return JSON.parse(normalized);
-  } catch {
-    return value;
-  }
+  const reparsed = tryParseJson(normalized);
+  return reparsed === null ? value : reparsed;
 }
 
-const confirmActionBaseInputSchema = z.object({
-  prompt: z.string().optional(),
-});
-
-export const confirmActionInputSchema = z.discriminatedUnion("action", [
-  confirmActionBaseInputSchema.extend({
-    action: z.literal("updateCell"),
-     actionPayload: z.preprocess(preprocessLooseJson, updateCellPayloadInputSchema),
-  }),
-  confirmActionBaseInputSchema.extend({
-    action: z.literal("deleteThread"),
-     actionPayload: z.preprocess(preprocessLooseJson, deleteThreadPayloadSchema),
-  }),
-  confirmActionBaseInputSchema.extend({
-    action: z.literal("sendInvites"),
-     actionPayload: z.preprocess(preprocessLooseJson, sendInvitesPayloadSchema),
-  }),
+const confirmActionPayloadInputSchema = z.union([
+  updateCellPayloadInputSchema,
+  deleteThreadPayloadInputSchema,
+  sendInvitesPayloadInputSchema,
+  z.string().trim().min(1),
 ]);
+
+export const confirmActionInputSchema = z
+  .object({
+    prompt: z.string().optional(),
+    action: z.enum(["updateCell", "deleteThread", "sendInvites"]),
+    actionPayload: confirmActionPayloadInputSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (typeof value.actionPayload === "string") {
+      return;
+    }
+
+    const isUpdateCell = updateCellPayloadInputSchema.safeParse(value.actionPayload).success;
+    const isDeleteThread =
+      deleteThreadPayloadInputSchema.safeParse(value.actionPayload).success;
+    const isSendInvites =
+      sendInvitesPayloadInputSchema.safeParse(value.actionPayload).success;
+
+    const matches =
+      (value.action === "updateCell" && isUpdateCell) ||
+      (value.action === "deleteThread" && isDeleteThread) ||
+      (value.action === "sendInvites" && isSendInvites);
+
+    if (!matches) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["actionPayload"],
+        message: "actionPayload must match the selected action.",
+      });
+    }
+  });
 
 const confirmActionBaseOutputSchema = z.object({
   approved: z.boolean(),
@@ -155,7 +198,7 @@ export const confirmActionOutputSchema = z.discriminatedUnion("action", [
 
 export const readRangeInputSchema = z.object({
   sheet: sheetNameInputSchema,
-  range: a1RangeSchema,
+  range: a1RangeInputSchema,
 });
 
 export const readRangeOutputSchema = z.object({
@@ -193,7 +236,7 @@ export const deleteThreadOutputSchema = z.object({
   deleted: z.boolean(),
 });
 
-export const sendInvitesInputSchema = sendInvitesPayloadSchema;
+export const sendInvitesInputSchema = sendInvitesPayloadInputSchema;
 
 export const sendInvitesOutputSchema = z.object({
   sent: z.array(z.string().min(1)),
@@ -202,7 +245,7 @@ export const sendInvitesOutputSchema = z.object({
 
 export const explainFormulaInputSchema = z.object({
   sheet: sheetNameInputSchema,
-  cell: a1CellSchema,
+  cell: a1CellInputSchema,
 });
 
 export const explainFormulaOutputSchema = z.object({

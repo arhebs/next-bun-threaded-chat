@@ -4,8 +4,13 @@ import {
   confirmActionInputSchema,
   confirmActionOutputSchema,
   deleteThreadInputSchema,
+  explainFormulaInputSchema,
+  parseLooseJson,
+  readRangeInputSchema,
+  sendInvitesInputSchema,
   sheetNameSchema,
   updateCellInputSchema,
+  updateCellPayloadSchema,
 } from "@/lib/chat/tool-types";
 
 describe("tool-types", () => {
@@ -26,9 +31,17 @@ describe("tool-types", () => {
       throw new Error("Expected updateCell action");
     }
 
-    expect(parsed.data.actionPayload.sheet).toBe("Sheet1");
-    expect(parsed.data.actionPayload.cell).toBe("A1");
-    expect(parsed.data.actionPayload.value).toBe(123);
+    if (typeof parsed.data.actionPayload === "string") {
+      throw new Error("Expected object actionPayload");
+    }
+
+    const payload = updateCellPayloadSchema.safeParse(parsed.data.actionPayload);
+    expect(payload.success).toBe(true);
+    if (!payload.success) return;
+
+    expect(payload.data.sheet).toBe("Sheet1");
+    expect(payload.data.cell).toBe("A1");
+    expect(payload.data.value).toBe(123);
   });
 
   it("accepts JSON string actionPayload and parses booleans/null-ish values", () => {
@@ -46,9 +59,19 @@ describe("tool-types", () => {
       throw new Error("Expected updateCell action");
     }
 
-    expect(parsed.data.actionPayload.sheet).toBe("Sheet1");
-    expect(parsed.data.actionPayload.cell).toBe("B2");
-    expect(parsed.data.actionPayload.value).toBe(true);
+    if (typeof parsed.data.actionPayload !== "string") {
+      throw new Error("Expected string actionPayload");
+    }
+
+    const parsedJson = parseLooseJson(parsed.data.actionPayload);
+    const payload = updateCellPayloadSchema.safeParse(parsedJson);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) return;
+
+    expect(payload.data.sheet).toBe("Sheet1");
+    expect(payload.data.cell).toBe("B2");
+    expect(payload.data.value).toBe(true);
   });
 
   it("coerces numeric strings for updateCell values", () => {
@@ -110,5 +133,14 @@ describe("tool-types", () => {
   it("enforces Sheet1 literal schema", () => {
     const parsed = sheetNameSchema.safeParse("Sheet1");
     expect(parsed.success).toBe(true);
+  });
+
+  it("tool input schemas convert to JSON Schema", () => {
+    expect(() => confirmActionInputSchema.toJSONSchema()).not.toThrow();
+    expect(() => readRangeInputSchema.toJSONSchema()).not.toThrow();
+    expect(() => updateCellInputSchema.toJSONSchema()).not.toThrow();
+    expect(() => deleteThreadInputSchema.toJSONSchema()).not.toThrow();
+    expect(() => sendInvitesInputSchema.toJSONSchema()).not.toThrow();
+    expect(() => explainFormulaInputSchema.toJSONSchema()).not.toThrow();
   });
 });
