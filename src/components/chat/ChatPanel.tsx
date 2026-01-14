@@ -17,8 +17,12 @@ import { cn } from "@/lib/cn";
 import {
   confirmActionOutputSchema,
   deleteThreadOutputSchema,
+  deleteThreadPayloadSchema,
+  parseLooseJson,
   readRangeOutputSchema,
+  sendInvitesPayloadSchema,
   updateCellOutputSchema,
+  updateCellPayloadSchema,
   type ConfirmActionInput,
   type ConfirmActionOutput,
   type ReadRangeOutput,
@@ -567,11 +571,49 @@ export function ChatPanel({
       if (!input || !part.toolCallId) {
         return;
       }
+
+      const rawPayload =
+        typeof input.actionPayload === "string"
+          ? parseLooseJson(input.actionPayload)
+          : input.actionPayload;
+
+      let normalizedPayload: unknown = rawPayload;
+
+      if (input.action === "updateCell") {
+        const candidate =
+          rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+            ? { sheet: "Sheet1", ...rawPayload }
+            : rawPayload;
+        const parsed = updateCellPayloadSchema.safeParse(candidate);
+        if (parsed.success) {
+          normalizedPayload = parsed.data;
+        }
+      } else if (input.action === "deleteThread") {
+        // Never allow the model to choose an arbitrary thread id: always confirm
+        // the currently active thread when possible.
+        if (threadId && threadId !== "no-thread") {
+          normalizedPayload = { threadId };
+        } else if (typeof rawPayload === "string") {
+          const trimmed = rawPayload.trim();
+          normalizedPayload = trimmed ? { threadId: trimmed } : rawPayload;
+        } else {
+          const parsed = deleteThreadPayloadSchema.safeParse(rawPayload);
+          if (parsed.success) {
+            normalizedPayload = parsed.data;
+          }
+        }
+      } else if (input.action === "sendInvites") {
+        const parsed = sendInvitesPayloadSchema.safeParse(rawPayload);
+        if (parsed.success) {
+          normalizedPayload = parsed.data;
+        }
+      }
+
       const output = {
         approved,
         confirmationToken: getConfirmationToken(part.toolCallId),
         action: input.action,
-        actionPayload: input.actionPayload,
+        actionPayload: normalizedPayload,
         ...(approved ? {} : { reason: "User declined" }),
       } as ConfirmActionOutput;
 
@@ -581,7 +623,7 @@ export function ChatPanel({
         output,
       });
     },
-    [addToolOutput, getConfirmationToken]
+    [addToolOutput, getConfirmationToken, threadId]
   );
 
   const renderConfirmActionPart = useCallback(
